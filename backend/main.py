@@ -11,10 +11,35 @@ from backend.database.session import engine
 from backend.models import Base
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+logger = logging.getLogger(__name__)
+
+
+def _ensure_columns() -> None:
+    """Lightweight SQLite-only migration: add columns introduced after a DB was
+    first created. SQLite allows ADD COLUMN; nullable so existing rows stay valid.
+    """
+    pending = {
+        "runs": [("batch_id", "ALTER TABLE runs ADD COLUMN batch_id VARCHAR(64)")],
+        "prompts": [("created_at", "ALTER TABLE prompts ADD COLUMN created_at DATETIME")],
+        "competitors": [("created_at", "ALTER TABLE competitors ADD COLUMN created_at DATETIME")],
+    }
+    with engine.begin() as conn:
+        for table, cols in pending.items():
+            try:
+                existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()}
+            except Exception:
+                continue
+            if not existing:  # table doesn't exist yet (fresh DB handled by create_all)
+                continue
+            for col, ddl in cols:
+                if col not in existing:
+                    logger.info("migrating: %s", ddl)
+                    conn.exec_driver_sql(ddl)
 
 
 def create_app() -> FastAPI:
     Base.metadata.create_all(bind=engine)
+    _ensure_columns()
     app = FastAPI(title="AI Search Visibility Tracker", version="0.1.0")
     app.add_middleware(
         CORSMiddleware,

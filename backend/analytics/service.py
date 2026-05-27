@@ -8,6 +8,7 @@ from sqlalchemy import select
 from backend.database.session import session_scope
 from backend.models import Citation, Mention, Project, Run
 from backend.ranking import compute_project_rankings
+from backend.utils.helpers import brand_root_from_domain
 
 
 class AnalyticsService:
@@ -52,6 +53,7 @@ class AnalyticsService:
                     "prompt": r.prompt,
                     "status": r.status,
                     "error": r.error,
+                    "batch_id": r.batch_id,
                     "created_at": r.created_at.isoformat() + "Z",
                     "mention_count": len(r.mentions),
                     "citation_count": len(r.citations),
@@ -141,3 +143,93 @@ class AnalyticsService:
             "brands": rows,
             "summary": rankings.get("providers", []),
         }
+
+    @staticmethod
+    def timeseries(project_id: int) -> dict[str, Any]:
+        """Per-capture-date trend for the line chart.
+
+        - competitor_visibility: average % of the day's prompts in which each
+          competitor appeared (mean across competitors).
+        - agent_mentions: total target-brand mentions across all AI agents
+          (providers) that day.
+        """
+        with session_scope() as db:
+            project = db.get(Project, project_id)
+            if project is None:
+                return {"points": []}
+            competitor_names = {c.competitor_name.lower() for c in project.competitors}
+            runs = db.scalars(
+                select(Run).where(Run.project_id == project_id).order_by(Run.created_at)
+            ).all()
+
+            buckets: dict[str, dict[str, Any]] = defaultdict(
+                lambda: {
+                    "prompts": set(),
+                    "agent_mentions": 0,
+                    "competitor_prompts": defaultdict(set),
+                }
+            )
+            for r in runs:
+                if r.status not in ("captured", "processed"):
+                    continue
+                date = (r.created_at.date().isoformat()) if r.created_at else "unknown"
+                b = buckets[date]
+                b["prompts"].add(r.prompt)
+                for m in r.mentions:
+                    if m.is_target:
+                        b["agent_mentions"] += 1
+                    elif m.normalized_entity.lower() in competitor_names:
+                        b["competitor_prompts"][m.normalized_entity.lower()].add(r.prompt)
+
+        points = []
+        for date in sorted(buckets):
+            b = buckets[date]
+            total = len(b["prompts"]) or 1
+            comp_prompts = b["competitor_prompts"]
+            if comp_prompts:
+                comp_vis = round(
+                    sum(len(s) / total * 100 for s in comp_prompts.values()) / len(comp_prompts), 1
+                )
+            else:
+                comp_vis = 0.0
+            points.append(
+                {
+                    "date": date,
+                    "competitor_visibility": comp_vis,
+                    "agent_mentions": b["agent_mentions"],
+                }
+            )
+        return {"points": points}
+
+    @staticmethod
+    def history(project_id: int) -> dict[str, Any]:
+        """Chronological log of competitors and queries added to the project."""
+        with session_scope() as db:
+            project = db.get(Project, project_id)
+            if project is None:
+                return {"competitors": [], "queries": []}
+
+            def _iso(dt):
+                return (dt.isoformat() + "Z") if dt else None
+
+            competitors = sorted(
+                project.competitors,
+                key=lambda c: (c.created_at is None, c.created_at),
+            )
+            queries = sorted(
+                project.prompts,
+                key=lambda p: (p.created_at is None, p.created_at),
+            )
+            return {
+                "competitors": [
+                    {
+                        "name": c.competitor_name,
+                        "inferred": c.inferred,
+                        "created_at": _iso(c.created_at),
+                    }
+                    for c in competitors
+                ],
+                "queries": [
+                    {"text": p.prompt_text, "created_at": _iso(p.created_at)} for p in queries
+                ],
+            }

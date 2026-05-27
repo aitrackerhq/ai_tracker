@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
+
+from sqlalchemy import select
 
 # patchright is a drop-in replacement for playwright that patches CDP-level
 # fingerprints (the only thing JS stealth scripts cannot hide). This is what
@@ -92,59 +96,83 @@ async def browser_context(provider_name: str) -> AsyncIterator[BrowserContext]:
             await ctx.close()
 
 
-class CaptureOrchestrator:
-    """Runs a batch of (provider, prompt) jobs."""
+def create_pending_runs(
+    project_id: int, prompts: list[str], providers: list[str]
+) -> tuple[str, list[int]]:
+    """Create one pending Run row per (provider × prompt) before any work starts.
 
-    def __init__(self, project_id: int, prompts: list[str], providers: list[str]):
-        self.project_id = project_id
-        self.prompts = prompts
-        self.providers = providers
+    Returns (batch_id, run_ids). The frontend can immediately render the full
+    pipeline (including not-yet-started steps) by polling this batch.
+    """
+    batch_id = uuid.uuid4().hex[:12]
+    run_ids: list[int] = []
+    with session_scope() as db:
+        for provider in providers:
+            for prompt in prompts:
+                run = Run(
+                    project_id=project_id,
+                    provider=provider,
+                    prompt=prompt,
+                    status="pending",
+                    batch_id=batch_id,
+                )
+                db.add(run)
+                db.flush()
+                run_ids.append(run.id)
+    return batch_id, run_ids
+
+
+class CaptureOrchestrator:
+    """Executes a set of pre-created Run rows, grouped by provider so each
+    provider's browser context is launched once and reused across its prompts.
+    """
+
+    def __init__(self, run_ids: list[int]):
+        self.run_ids = run_ids
 
     async def run(self) -> list[int]:
-        run_ids: list[int] = []
-        for provider_name in self.providers:
+        with session_scope() as db:
+            rows = db.scalars(select(Run).where(Run.id.in_(self.run_ids))).all()
+            jobs = [(r.id, r.provider, r.prompt) for r in rows]
+
+        by_provider: dict[str, list[tuple[int, str]]] = defaultdict(list)
+        for run_pk, provider, prompt in jobs:
+            by_provider[provider].append((run_pk, prompt))
+
+        done: list[int] = []
+        for provider_name, plist in by_provider.items():
             cls = PROVIDER_REGISTRY.get(provider_name)
             if not cls:
-                logger.warning("unknown provider: %s", provider_name)
+                self._fail_all([pk for pk, _ in plist], f"unknown provider: {provider_name}")
                 continue
-            # API-based providers (e.g. google_ai via SerpAPI) signal they don't
-            # need a browser by setting the class attribute `needs_browser = False`.
-            if getattr(cls, "needs_browser", True):
-                async with browser_context(provider_name) as ctx:
-                    for prompt in self.prompts:
-                        run_id_pk = await self._run_one(cls, ctx, provider_name, prompt)
-                        if run_id_pk is not None:
-                            run_ids.append(run_id_pk)
-            else:
-                # No browser — pass None as context; provider ignores it.
-                for prompt in self.prompts:
-                    run_id_pk = await self._run_one(cls, None, provider_name, prompt)
-                    if run_id_pk is not None:
-                        run_ids.append(run_id_pk)
-        return run_ids
+            needs_browser = getattr(cls, "needs_browser", True)
+            try:
+                if needs_browser:
+                    async with browser_context(provider_name) as ctx:
+                        for run_pk, prompt in plist:
+                            await self._run_one(cls, ctx, run_pk, prompt)
+                            done.append(run_pk)
+                else:
+                    for run_pk, prompt in plist:
+                        await self._run_one(cls, None, run_pk, prompt)
+                        done.append(run_pk)
+            except Exception as exc:
+                # e.g. browser failed to launch for the whole provider
+                logger.exception("provider batch failed: %s", provider_name)
+                self._fail_all([pk for pk, _ in plist if pk not in done], repr(exc))
+        return done
 
     async def _run_one(
         self,
         cls: type[BaseProvider],
-        ctx: BrowserContext,
-        provider_name: str,
+        ctx: BrowserContext | None,
+        run_pk: int,
         prompt: str,
-    ) -> int | None:
+    ) -> None:
         run_uid = new_run_id()
-        provider = cls(ctx)
-        run_pk: int | None = None
+        provider = cls(ctx)  # type: ignore[arg-type]
         try:
-            with session_scope() as db:
-                run = Run(
-                    project_id=self.project_id,
-                    provider=provider_name,
-                    prompt=prompt,
-                    status="running",
-                )
-                db.add(run)
-                db.flush()
-                run_pk = run.id
-
+            self._set_status(run_pk, "running")
             await provider.initialize()
             result = await provider.capture(prompt, run_uid)
             raw_path = raw_store.write(run_uid, result.to_dict())
@@ -157,28 +185,37 @@ class CaptureOrchestrator:
                     run.html_path = result.html_path
                     run.status = "captured"
 
-            # process immediately (still a separate layer — orchestrator just chains them)
+            # processing is a separate layer; orchestrator just chains the call
             process_run(run_pk)
+            self._set_status(run_pk, "processed")
 
         except ProviderError as exc:
             logger.exception("provider error")
-            with session_scope() as db:
-                run = db.get(Run, run_pk) if run_pk else None
-                if run is not None:
-                    run.status = "error"
-                    run.error = str(exc)
+            self._set_error(run_pk, str(exc))
         except Exception as exc:
             logger.exception("capture failed")
-            with session_scope() as db:
-                run = db.get(Run, run_pk) if run_pk else None
-                if run is not None:
-                    run.status = "error"
-                    run.error = repr(exc)
+            self._set_error(run_pk, repr(exc))
         finally:
             await provider.close()
-        return run_pk
+
+    def _set_status(self, run_pk: int, status: str) -> None:
+        with session_scope() as db:
+            run = db.get(Run, run_pk)
+            if run is not None:
+                run.status = status
+
+    def _set_error(self, run_pk: int, message: str) -> None:
+        with session_scope() as db:
+            run = db.get(Run, run_pk)
+            if run is not None:
+                run.status = "error"
+                run.error = message
+
+    def _fail_all(self, run_pks: list[int], message: str) -> None:
+        for pk in run_pks:
+            self._set_error(pk, message)
 
 
-def run_capture(project_id: int, prompts: list[str], providers: list[str]) -> list[int]:
-    """Sync entry-point for background tasks."""
-    return asyncio.run(CaptureOrchestrator(project_id, prompts, providers).run())
+def run_capture(run_ids: list[int]) -> list[int]:
+    """Sync entry-point for background tasks. Operates on pre-created run rows."""
+    return asyncio.run(CaptureOrchestrator(run_ids).run())

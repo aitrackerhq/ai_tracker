@@ -171,6 +171,25 @@ Raw data is immutable. Re-running the processing layer (`POST /api/projects/{id}
 or the **Reprocess** button) re-derives mentions, citations, and rankings without
 re-scraping.
 
+## Dashboard pages
+
+- **Overview** — visibility score, mention/citation totals, top-brands bar chart,
+  per-provider pie, a live **Capture Pipeline** panel, and a **Visibility Trend**
+  line chart (Competitor AI Visibility vs. your AI Agent Mentions over time).
+- **Prompt Runs** — every (provider × prompt) run with status + detail modal.
+- **Competitors** — co-mention analysis vs. the target brand.
+- **Providers** — brand × provider mention matrix.
+- **History** — chronological log of competitors added (manual vs. auto-detected)
+  and queries added.
+
+### Live capture pipeline
+
+Clicking **Run capture** pre-creates one `pending` run per (provider × prompt)
+and runs them in the background. The Overview page's **Capture Pipeline** panel
+polls every 2s and shows each step move through `Queued → Running →
+Succeeded/Failed`, grouped by provider — a Profound-style orchestrator view that
+stops polling once all steps settle.
+
 ## Visibility score
 
 ```

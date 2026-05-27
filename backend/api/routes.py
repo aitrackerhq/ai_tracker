@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from backend.analytics import AnalyticsService
 from backend.api.schemas import CaptureRequest, ProjectCreate, ProjectOut
-from backend.capture import run_capture
+from backend.capture import create_pending_runs, run_capture
 from backend.database.session import session_scope
 from backend.models import Competitor, Project, Prompt
 from backend.processing.pipeline import process_project
@@ -95,8 +95,17 @@ def trigger_capture(
     if unknown:
         raise HTTPException(400, f"unknown providers: {unknown}")
 
-    bg.add_task(run_capture, project_id, prompts, payload.providers)
-    return {"ok": True, "providers": payload.providers, "prompts": len(prompts)}
+    # Pre-create all (provider × prompt) runs as "pending" so the dashboard can
+    # render the full pipeline immediately, then run them in the background.
+    batch_id, run_ids = create_pending_runs(project_id, prompts, payload.providers)
+    bg.add_task(run_capture, run_ids)
+    return {
+        "ok": True,
+        "batch_id": batch_id,
+        "run_ids": run_ids,
+        "providers": payload.providers,
+        "prompts": len(prompts),
+    }
 
 
 @router.post("/projects/{project_id}/reprocess")
@@ -136,6 +145,16 @@ def competitors(project_id: int) -> dict:
 @router.get("/projects/{project_id}/providers")
 def provider_comparison(project_id: int) -> dict:
     return AnalyticsService.provider_comparison(project_id)
+
+
+@router.get("/projects/{project_id}/timeseries")
+def timeseries(project_id: int) -> dict:
+    return AnalyticsService.timeseries(project_id)
+
+
+@router.get("/projects/{project_id}/history")
+def history(project_id: int) -> dict:
+    return AnalyticsService.history(project_id)
 
 
 # ---------- artifacts ----------
