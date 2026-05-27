@@ -3,11 +3,13 @@ import { useFetch } from "../hooks/useFetch";
 import { api } from "../services/api";
 import { Card, EmptyState, SectionHeader, Skeleton, Stat, Badge } from "../components/ui";
 import { ProjectHeader } from "../components/ProjectHeader";
-import { BrandsBarChart, ProvidersPieChart } from "../charts/Charts";
+import { CaptureProgress } from "../components/CaptureProgress";
+import { BrandsBarChart, ProvidersPieChart, VisibilityTrendChart } from "../charts/Charts";
 
 export default function Overview() {
   const { projectId } = useParams();
   const { data, loading, reload } = useFetch(() => api.overview(projectId), [projectId]);
+  const { data: trend } = useFetch(() => api.timeseries(projectId), [projectId]);
 
   if (loading) {
     return (
@@ -25,6 +27,8 @@ export default function Overview() {
   return (
     <div>
       <ProjectHeader onAction={reload} />
+
+      <CaptureProgress projectId={projectId} onSettled={reload} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         <Stat
@@ -62,6 +66,20 @@ export default function Overview() {
           )}
         </Card>
       </div>
+
+      <Card className="mb-8">
+        <SectionHeader
+          title="Visibility trend"
+          subtitle="Competitor AI visibility vs. your AI agent mentions over time"
+        />
+        {trend?.points?.length ? (
+          <VisibilityTrendChart points={trend.points} />
+        ) : (
+          <div className="text-sm text-text-muted py-12 text-center">
+            Trend appears once you have captures across multiple days.
+          </div>
+        )}
+      </Card>
 
       <Card>
         <SectionHeader title="Top brands" />

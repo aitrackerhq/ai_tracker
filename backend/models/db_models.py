@@ -34,6 +34,7 @@ class Prompt(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="prompts")
 
@@ -45,6 +46,7 @@ class Run(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    batch_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     raw_json_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     processed_json_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     screenshot_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -90,5 +92,6 @@ class Competitor(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     competitor_name: Mapped[str] = mapped_column(String(255), nullable=False)
     inferred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="competitors")

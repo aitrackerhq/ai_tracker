@@ -4,6 +4,8 @@ import {
   CartesianGrid,
   Cell,
   Legend,
+  Line,
+  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -63,6 +65,56 @@ export function ProvidersPieChart({ providers }) {
         <Tooltip />
         <Legend wrapperStyle={{ color: "#8b8b95", fontSize: 12 }} />
       </PieChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function VisibilityTrendChart({ points }) {
+  const data = points || [];
+  if (!data.length) return null;
+  return (
+    <ResponsiveContainer width="100%" height={280}>
+      <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
+        <CartesianGrid stroke="#22222a" vertical={false} />
+        <XAxis dataKey="date" stroke="#5a5a64" fontSize={11} tick={{ fill: "#8b8b95" }} />
+        <YAxis
+          yAxisId="left"
+          stroke="#5a5a64"
+          fontSize={11}
+          tick={{ fill: "#8b8b95" }}
+          label={{ value: "%", angle: 0, position: "insideTopLeft", fill: "#5a5a64", fontSize: 10 }}
+        />
+        <YAxis
+          yAxisId="right"
+          orientation="right"
+          stroke="#5a5a64"
+          fontSize={11}
+          tick={{ fill: "#8b8b95" }}
+          allowDecimals={false}
+        />
+        <Tooltip cursor={{ stroke: "#2c2c36" }} />
+        <Legend wrapperStyle={{ color: "#8b8b95", fontSize: 12 }} />
+        <Line
+          yAxisId="left"
+          type="monotone"
+          dataKey="competitor_visibility"
+          name="Competitor AI Visibility (%)"
+          stroke="#ffb84d"
+          strokeWidth={2}
+          dot={{ r: 3 }}
+          activeDot={{ r: 5 }}
+        />
+        <Line
+          yAxisId="right"
+          type="monotone"
+          dataKey="agent_mentions"
+          name="AI Agent Mentions"
+          stroke="#5b8def"
+          strokeWidth={2}
+          dot={{ r: 3 }}
+          activeDot={{ r: 5 }}
+        />
+      </LineChart>
     </ResponsiveContainer>
   );
 }

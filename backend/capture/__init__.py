@@ -1,3 +1,3 @@
-from backend.capture.orchestrator import CaptureOrchestrator, run_capture
+from backend.capture.orchestrator import CaptureOrchestrator, create_pending_runs, run_capture
 
-__all__ = ["CaptureOrchestrator", "run_capture"]
+__all__ = ["CaptureOrchestrator", "create_pending_runs", "run_capture"]

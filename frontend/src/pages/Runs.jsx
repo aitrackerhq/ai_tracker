@@ -10,6 +10,7 @@ function statusBadge(status) {
   if (status === "processed") return <Badge tone="success">processed</Badge>;
   if (status === "captured") return <Badge tone="info">captured</Badge>;
   if (status === "running") return <Badge tone="warn">running</Badge>;
+  if (status === "pending") return <Badge>queued</Badge>;
   if (status === "error") return <Badge tone="danger">error</Badge>;
   return <Badge>{status}</Badge>;
 }

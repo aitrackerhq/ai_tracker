@@ -1,4 +1,4 @@
-import { NavLink, useParams } from "react-router-dom";
+import { NavLink, useMatch } from "react-router-dom";
 import clsx from "clsx";
 import {
   LayoutDashboard,
@@ -6,6 +6,8 @@ import {
   Users,
   GitCompare,
   FolderKanban,
+  Clock,
+  Workflow,
 } from "lucide-react";
 
 const linkBase =
@@ -14,13 +16,18 @@ const linkInactive = "text-text-muted hover:text-text-primary hover:bg-bg-hover"
 const linkActive = "bg-bg-hover text-text-primary";
 
 export function Sidebar() {
-  const { projectId } = useParams();
+  // Sidebar renders outside <Routes>, so useParams() won't see route params.
+  // Match the project path directly off the current URL instead.
+  const match = useMatch("/projects/:projectId/*");
+  const projectId = match?.params?.projectId;
   const items = projectId
     ? [
         { to: `/projects/${projectId}/overview`, label: "Overview", icon: LayoutDashboard },
         { to: `/projects/${projectId}/runs`, label: "Prompt Runs", icon: PlayCircle },
+        { to: `/projects/${projectId}/orchestration`, label: "Orchestration", icon: Workflow },
         { to: `/projects/${projectId}/competitors`, label: "Competitors", icon: Users },
         { to: `/projects/${projectId}/providers`, label: "Providers", icon: GitCompare },
+        { to: `/projects/${projectId}/history`, label: "History", icon: Clock },
       ]
     : [];
 

@@ -5,6 +5,8 @@ import Overview from "./pages/Overview";
 import Runs from "./pages/Runs";
 import Competitors from "./pages/Competitors";
 import Providers from "./pages/Providers";
+import History from "./pages/History";
+import Orchestration from "./pages/Orchestration";
 
 export default function App() {
   return (
@@ -16,6 +18,8 @@ export default function App() {
         <Route path="/projects/:projectId/runs" element={<Runs />} />
         <Route path="/projects/:projectId/competitors" element={<Competitors />} />
         <Route path="/projects/:projectId/providers" element={<Providers />} />
+        <Route path="/projects/:projectId/orchestration" element={<Orchestration />} />
+        <Route path="/projects/:projectId/history" element={<History />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </Layout>

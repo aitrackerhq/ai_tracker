@@ -31,6 +31,8 @@ export const api = {
   runDetail: (rid) => request(`/api/runs/${rid}`),
   competitors: (id) => request(`/api/projects/${id}/competitors`),
   providers: (id) => request(`/api/projects/${id}/providers`),
+  timeseries: (id) => request(`/api/projects/${id}/timeseries`),
+  history: (id) => request(`/api/projects/${id}/history`),
   supportedProviders: () => request("/api/providers"),
   screenshotUrl: (rid) => `${BASE}/api/artifacts/screenshot/${rid}`,
 };
