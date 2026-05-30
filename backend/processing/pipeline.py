@@ -6,9 +6,11 @@ from typing import Any
 from sqlalchemy import select
 
 from backend.database.session import session_scope
-from backend.models import Citation, Competitor, Mention, Project, Run
+from backend.models import Citation, Mention, Project, Run
+from backend.config import settings
 from backend.processing.ner import EntityExtractor
 from backend.processing.normalizer import EntityNormalizer
+from backend.processing.sentiment import analyze_framing
 from backend.storage import processed_store, raw_store
 from backend.utils.helpers import brand_root_from_domain, domain_from_url
 
@@ -126,24 +128,23 @@ def process_run(run_pk: int) -> dict[str, Any] | None:
         }
         processed_path = processed_store.write(_run_uid_from_path(run.raw_json_path), processed_payload)
         run.processed_json_path = str(processed_path)
+
+        # Local sentiment/framing of the target brand (HF model, no API).
+        if settings.enable_sentiment:
+            target_brand = normalizer.canonical_for(target_key)
+            try:
+                framing = analyze_framing(target_brand, response_text)
+                run.target_sentiment = framing.get("sentiment")
+                run.target_framing = framing.get("framing")
+                run.framing_rationale = framing.get("rationale")
+            except Exception:
+                logger.exception("sentiment analysis failed for run %s", run_pk)
+
         run.status = "processed"
 
-        # opportunistically infer competitors (any non-target brand mentioned)
-        existing = {c.competitor_name.lower() for c in project.competitors}
-        for ckey, brand in normalizer.brands.items():
-            if ckey == target_key:
-                continue
-            if brand.canonical.lower() in existing:
-                continue
-            if any(m.normalized_entity.lower() == brand.canonical.lower() for m in run.mentions):
-                db.add(
-                    Competitor(
-                        project_id=project.id,
-                        competitor_name=brand.canonical,
-                        inferred=True,
-                    )
-                )
-                existing.add(brand.canonical.lower())
+        # NOTE: competitor auto-detection is now done by the LLM at the project
+        # level (backend.llm.service.detect_competitors), not by noisy per-run NER.
+        # See backend.capture.competitors.detect_competitors_for_project.
 
         return processed_payload
 

@@ -13,15 +13,21 @@ export function ProjectHeader({ onAction }) {
       <div>
         <div className="text-xs uppercase tracking-wider text-text-muted">Project</div>
         <h1 className="text-2xl font-semibold">{project.name}</h1>
-        <div className="flex items-center gap-2 mt-1">
+        <div className="flex items-center gap-2 mt-1 flex-wrap">
           <span className="text-sm font-mono text-text-muted">{project.domain}</span>
+          {project.geo_location && <Badge>{project.geo_location}</Badge>}
           <Badge tone="info">{project.prompts.length} prompts</Badge>
           <Badge>{project.competitors.length} competitors</Badge>
+          <Badge>{(project.providers || []).length} providers</Badge>
         </div>
       </div>
       <div className="flex items-center gap-2">
         <ReprocessButton projectId={projectId} onDone={onAction} />
-        <CaptureButton projectId={projectId} onStarted={onAction} />
+        <CaptureButton
+          projectId={projectId}
+          onStarted={onAction}
+          initialProviders={project.providers}
+        />
       </div>
     </div>
   );

@@ -3,7 +3,6 @@ import clsx from "clsx";
 import {
   LayoutDashboard,
   PlayCircle,
-  Users,
   GitCompare,
   FolderKanban,
   Clock,
@@ -25,7 +24,6 @@ export function Sidebar() {
         { to: `/projects/${projectId}/overview`, label: "Overview", icon: LayoutDashboard },
         { to: `/projects/${projectId}/runs`, label: "Prompt Runs", icon: PlayCircle },
         { to: `/projects/${projectId}/orchestration`, label: "Orchestration", icon: Workflow },
-        { to: `/projects/${projectId}/competitors`, label: "Competitors", icon: Users },
         { to: `/projects/${projectId}/providers`, label: "Providers", icon: GitCompare },
         { to: `/projects/${projectId}/history`, label: "History", icon: Clock },
       ]

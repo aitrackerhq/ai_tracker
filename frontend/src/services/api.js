@@ -33,6 +33,19 @@ export const api = {
   providers: (id) => request(`/api/projects/${id}/providers`),
   timeseries: (id) => request(`/api/projects/${id}/timeseries`),
   history: (id) => request(`/api/projects/${id}/history`),
+  framingContext: (id) => request(`/api/projects/${id}/framing-context`),
+  llmStatus: () => request(`/api/llm/status`),
+  suggestPrompts: (id) =>
+    request(`/api/projects/${id}/suggest-prompts`, { method: "POST" }),
+  suggestPromptsAdhoc: (body) =>
+    request(`/api/llm/suggest-prompts`, { method: "POST", body: JSON.stringify(body) }),
+  addPrompts: (id, prompts) =>
+    request(`/api/projects/${id}/prompts`, {
+      method: "POST",
+      body: JSON.stringify({ prompts }),
+    }),
+  detectCompetitors: (id) =>
+    request(`/api/projects/${id}/detect-competitors`, { method: "POST" }),
   supportedProviders: () => request("/api/providers"),
   screenshotUrl: (rid) => `${BASE}/api/artifacts/screenshot/${rid}`,
 };

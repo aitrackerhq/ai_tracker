@@ -4,15 +4,25 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from backend.analytics import AnalyticsService
-from backend.api.schemas import CaptureRequest, ProjectCreate, ProjectOut
+from backend.api.schemas import (
+    CaptureRequest,
+    ProjectCreate,
+    ProjectOut,
+    SuggestPromptsBody,
+)
 from backend.capture import create_pending_runs, run_capture
+from backend.capture.competitors import detect_competitors_for_project
+from backend.config import settings
 from backend.database.session import session_scope
+from backend.llm import gemini, service as llm_service
 from backend.models import Competitor, Project, Prompt
 from backend.processing.pipeline import process_project
 from backend.providers import PROVIDER_REGISTRY
+from backend.storage import purge_run_files
 
 router = APIRouter(prefix="/api")
 
@@ -24,7 +34,13 @@ def create_project(payload: ProjectCreate) -> ProjectOut:
     if not payload.name or not payload.domain:
         raise HTTPException(400, "name and domain are required")
     with session_scope() as db:
-        proj = Project(name=payload.name.strip(), domain=payload.domain.strip().lower())
+        valid_providers = [p for p in payload.providers if p in PROVIDER_REGISTRY]
+        proj = Project(
+            name=payload.name.strip(),
+            domain=payload.domain.strip().lower(),
+            geo_location=(payload.geo_location or "").strip() or None,
+            providers=",".join(valid_providers) or None,
+        )
         db.add(proj)
         db.flush()
         for p in payload.prompts[:5]:
@@ -59,8 +75,10 @@ def delete_project(project_id: int) -> dict:
         proj = db.get(Project, project_id)
         if proj is None:
             raise HTTPException(404, "project not found")
+        # remove on-disk artifacts first so deleting a project doesn't orphan files
+        files_removed = sum(purge_run_files(r) for r in proj.runs)
         db.delete(proj)
-    return {"ok": True}
+    return {"ok": True, "files_removed": files_removed}
 
 
 def _project_to_out(p: Project) -> ProjectOut:
@@ -70,6 +88,8 @@ def _project_to_out(p: Project) -> ProjectOut:
         domain=p.domain,
         prompts=[pr.prompt_text for pr in p.prompts],
         competitors=[c.competitor_name for c in p.competitors],
+        geo_location=p.geo_location,
+        providers=[s for s in (p.providers or "").split(",") if s],
         created_at=p.created_at.isoformat() + "Z",
     )
 
@@ -87,6 +107,8 @@ def trigger_capture(
         if proj is None:
             raise HTTPException(404, "project not found")
         prompts = payload.prompts or [p.prompt_text for p in proj.prompts]
+        # geo precedence: request override → project default → global default
+        geo = payload.geo_location or proj.geo_location or settings.default_geo_location
 
     if not prompts:
         raise HTTPException(400, "no prompts to run")
@@ -95,16 +117,24 @@ def trigger_capture(
     if unknown:
         raise HTTPException(400, f"unknown providers: {unknown}")
 
+    # Persist the chosen providers as the project's default for next time.
+    with session_scope() as db:
+        proj = db.get(Project, project_id)
+        if proj is not None and payload.providers:
+            proj.providers = ",".join(payload.providers)
+
     # Pre-create all (provider × prompt) runs as "pending" so the dashboard can
     # render the full pipeline immediately, then run them in the background.
-    batch_id, run_ids = create_pending_runs(project_id, prompts, payload.providers)
-    bg.add_task(run_capture, run_ids)
+    batch_id, run_ids = create_pending_runs(project_id, prompts, payload.providers, geo)
+    bg.add_task(run_capture, run_ids, payload.force_refresh)
     return {
         "ok": True,
         "batch_id": batch_id,
         "run_ids": run_ids,
         "providers": payload.providers,
         "prompts": len(prompts),
+        "geo_location": geo,
+        "force_refresh": payload.force_refresh,
     }
 
 
@@ -112,6 +142,70 @@ def trigger_capture(
 def reprocess(project_id: int) -> dict:
     count = process_project(project_id)
     return {"ok": True, "reprocessed": count}
+
+
+# ---------- LLM intelligence ----------
+
+@router.get("/llm/status")
+def llm_status() -> dict:
+    return {"configured": gemini.is_configured(), "model": settings.gemini_model}
+
+
+@router.post("/llm/suggest-prompts")
+async def suggest_prompts_adhoc(body: SuggestPromptsBody) -> dict:
+    """Project-less suggestions for the new-project form (no project exists yet)."""
+    if not gemini.is_configured():
+        raise HTTPException(400, "GEMINI_API_KEY is not set")
+    if not body.domain.strip():
+        raise HTTPException(400, "domain is required")
+    suggestions = await llm_service.suggest_prompts(
+        body.domain.strip(), body.existing_prompts, body.competitors
+    )
+    return {"suggestions": suggestions}
+
+
+@router.post("/projects/{project_id}/suggest-prompts")
+async def suggest_prompts(project_id: int) -> dict:
+    if not gemini.is_configured():
+        raise HTTPException(400, "GEMINI_API_KEY is not set")
+    with session_scope() as db:
+        proj = db.get(Project, project_id)
+        if proj is None:
+            raise HTTPException(404, "project not found")
+        domain = proj.domain
+        existing = [p.prompt_text for p in proj.prompts]
+        competitors = [c.competitor_name for c in proj.competitors]
+    suggestions = await llm_service.suggest_prompts(domain, existing, competitors)
+    return {"suggestions": suggestions}
+
+
+class AddPromptsBody(BaseModel):
+    prompts: list[str]
+
+
+@router.post("/projects/{project_id}/prompts")
+def add_prompts(project_id: int, body: AddPromptsBody) -> dict:
+    with session_scope() as db:
+        proj = db.get(Project, project_id)
+        if proj is None:
+            raise HTTPException(404, "project not found")
+        existing = {p.prompt_text.strip().lower() for p in proj.prompts}
+        added = 0
+        for text in body.prompts:
+            t = text.strip()
+            if t and t.lower() not in existing:
+                db.add(Prompt(project_id=project_id, prompt_text=t))
+                existing.add(t.lower())
+                added += 1
+    return {"ok": True, "added": added}
+
+
+@router.post("/projects/{project_id}/detect-competitors")
+async def detect_competitors(project_id: int) -> dict:
+    if not gemini.is_configured():
+        raise HTTPException(400, "GEMINI_API_KEY is not set")
+    added = await detect_competitors_for_project(project_id)
+    return {"ok": True, "added": added}
 
 
 # ---------- analytics ----------
@@ -155,6 +249,11 @@ def timeseries(project_id: int) -> dict:
 @router.get("/projects/{project_id}/history")
 def history(project_id: int) -> dict:
     return AnalyticsService.history(project_id)
+
+
+@router.get("/projects/{project_id}/framing-context")
+def framing_context(project_id: int) -> dict:
+    return AnalyticsService.framing_context(project_id)
 
 
 # ---------- artifacts ----------

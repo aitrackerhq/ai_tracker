@@ -78,13 +78,18 @@ python -m scripts.init_db
 
 ### 2. Provider auth status
 
-All three providers run **anonymously** — no login required.
+All providers run **anonymously** — no login required.
 
-| Provider    | Login? | Notes                                                                                 |
-| ----------- | ------ | ------------------------------------------------------------------------------------- |
-| `chatgpt`   | No     | Anonymous `chatgpt.com` flow. Cloudflare Turnstile is handled by the stealth layer.   |
-| `gemini`    | No     | `gemini.google.com` allows signed-out queries; consent dialog is auto-dismissed.      |
-| `google_ai` | No     | Anonymous Google Search; consent dialog auto-dismissed.                               |
+| Provider         | Type    | Notes                                                                              |
+| ---------------- | ------- | ---------------------------------------------------------------------------------- |
+| `chatgpt`        | Browser | Anonymous `chatgpt.com`. Cloudflare Turnstile handled by patchright + stealth.     |
+| `gemini`         | Browser | `gemini.google.com` allows signed-out queries; consent auto-dismissed.             |
+| `perplexity`     | Browser | Anonymous `perplexity.ai`; citation-rich. Cloudflare handled by patchright.        |
+| `google_ai`      | SerpAPI | Google AI Overview via SerpAPI (two-step `page_token`). Needs `SERP_API_KEY`.      |
+| `google_ai_mode` | SerpAPI | Google AI Mode via SerpAPI (`engine=google_ai_mode`). Needs `SERP_API_KEY`.        |
+
+Browser providers honor an optional `PROXY_URL` for proxy rotation. SerpAPI
+providers need no browser and never hit Cloudflare.
 
 Optional: if you *want* to use a signed-in session (higher ChatGPT rate limits,
 or Gemini features only available to logged-in users), run:
@@ -189,6 +194,61 @@ and runs them in the background. The Overview page's **Capture Pipeline** panel
 polls every 2s and shows each step move through `Queued → Running →
 Succeeded/Failed`, grouped by provider — a Profound-style orchestrator view that
 stops polling once all steps settle.
+
+## Brand intelligence
+
+### Sentiment & framing (local model)
+
+Runs entirely **locally** in the processing layer — no API cost, no per-run
+network latency. For each run we detect how the target brand is portrayed:
+
+- **sentiment**: positive / neutral / negative
+- **framing**: leader / also-ran / cautionary / not-mentioned
+
+Sentiment uses a HuggingFace model (`cardiffnlp/twitter-roberta-base-sentiment-latest`
+by default, `SENTIMENT_MODEL`), loaded lazily on first use. If `transformers`/
+`torch` aren't installed it falls back to a built-in lexicon, so it always
+works. Framing is a rule-based read over the brand's sentences combined with the
+sentiment label. Shown per-run (Runs table + detail) and summarised on the
+Overview. Toggle with `ENABLE_SENTIMENT`. This is what turns a mention *counter*
+into a brand-intelligence tool.
+
+### LLM features (Gemini)
+
+With `GEMINI_API_KEY` set, two occasional (not per-run) features turn on:
+
+- **Prompt suggestions** — *Overview → Prompt suggestions → Generate.* Gemini
+  infers your industry from the domain + tracked prompts and proposes
+  high-intent queries your brand *should* appear in (unaided — brand name
+  excluded). Select and append them in one click.
+- **Competitor auto-detection** — replaces the old noisy per-run NER inference.
+  Gemini receives the domain + prompts + raw AI responses and returns clean,
+  deduplicated competitor brands (with a one-line reason each). Runs
+  automatically at the end of a capture batch, and on demand via
+  *Competitors → Auto-detect (AI)*.
+
+Both degrade gracefully: if `GEMINI_API_KEY` is unset they simply no-op and the
+core capture/processing pipeline is unaffected.
+
+## Geo-location
+
+Each project can carry a default `geo_location` (e.g. `"United States"`,
+`"London, England"`, `"Mumbai, India"`). It's passed to SerpAPI's `location`
+param for location-aware AI Overview / AI Mode results. Precedence at capture
+time: **request override → project default → `DEFAULT_GEO_LOCATION`**.
+
+## Caching, TTL & resilience
+
+These are configured in `.env` (sensible defaults shown):
+
+| Concern            | Setting(s)                                                              | Behaviour                                                                                                  |
+| ------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Result cache**   | `CACHE_TTL_HOURS=24`                                                     | A re-run reuses a recent successful capture for the same (project, provider, prompt, geo). `force_refresh` (capture menu) bypasses it. Cached runs are flagged in the UI. |
+| **Artifact TTL**   | `ARTIFACT_TTL_DAYS=7`, `CLEANUP_INTERVAL_HOURS=24`                       | Raw JSON + screenshots + HTML older than the TTL are purged (runs marked `purged`); aggregated DB rows are kept. Runs once at startup, then on the interval. Manual: `python -m scripts.cleanup [days]`. |
+| **Rate limiting**  | `PROVIDER_MIN_DELAY_SECONDS=3`                                          | Minimum delay between requests to the same provider.                                                       |
+| **Backoff**        | `PROVIDER_MAX_RETRIES=2`, `PROVIDER_BACKOFF_BASE=2.0`                    | Failed captures retry with exponential backoff (`base**attempt` seconds).                                  |
+| **Circuit breaker**| `CIRCUIT_BREAKER_THRESHOLD=3`                                            | After N consecutive failures for a provider, remaining jobs in that batch fail fast instead of hammering.  |
+| **Proxy (hook)**   | `PROXY_URL`                                                             | Optional proxy server for browser providers — proxy-rotation integration point.                            |
 
 ## Visibility score
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -8,6 +9,7 @@ from sqlalchemy import select
 from backend.database.session import session_scope
 from backend.models import Citation, Mention, Project, Run
 from backend.ranking import compute_project_rankings
+from backend.storage import raw_store
 from backend.utils.helpers import brand_root_from_domain
 
 
@@ -24,11 +26,23 @@ class AnalyticsService:
             total_mentions = sum(b["mentions"] for b in rankings.get("brands", []))
             total_citations = sum(p["citations"] for p in rankings.get("providers", []))
             target = rankings.get("target") or {}
+
+            # sentiment / framing summary across runs where the target was analysed
+            runs = db.scalars(select(Run).where(Run.project_id == project_id)).all()
+            sentiment = Counter()
+            framing = Counter()
+            for r in runs:
+                if r.target_sentiment:
+                    sentiment[r.target_sentiment] += 1
+                if r.target_framing:
+                    framing[r.target_framing] += 1
+
             return {
                 "project": {
                     "id": project.id,
                     "name": project.name,
                     "domain": project.domain,
+                    "geo_location": project.geo_location,
                 },
                 "visibility_score": target.get("visibility_score", 0.0),
                 "target_brand": target.get("brand"),
@@ -38,6 +52,8 @@ class AnalyticsService:
                 "total_runs": rankings.get("total_runs", 0),
                 "providers": rankings.get("providers", []),
                 "top_brands": rankings.get("brands", [])[:10],
+                "sentiment": dict(sentiment),
+                "framing": dict(framing),
             }
 
     @staticmethod
@@ -54,6 +70,10 @@ class AnalyticsService:
                     "status": r.status,
                     "error": r.error,
                     "batch_id": r.batch_id,
+                    "geo_location": r.geo_location,
+                    "cached": r.cached,
+                    "target_sentiment": r.target_sentiment,
+                    "target_framing": r.target_framing,
                     "created_at": r.created_at.isoformat() + "Z",
                     "mention_count": len(r.mentions),
                     "citation_count": len(r.citations),
@@ -76,6 +96,9 @@ class AnalyticsService:
                 "prompt": r.prompt,
                 "status": r.status,
                 "error": r.error,
+                "target_sentiment": r.target_sentiment,
+                "target_framing": r.target_framing,
+                "framing_rationale": r.framing_rationale,
                 "created_at": r.created_at.isoformat() + "Z",
                 "raw_json_path": r.raw_json_path,
                 "processed_json_path": r.processed_json_path,
@@ -233,3 +256,39 @@ class AnalyticsService:
                     {"text": p.prompt_text, "created_at": _iso(p.created_at)} for p in queries
                 ],
             }
+
+    @staticmethod
+    def framing_context(project_id: int) -> dict[str, Any]:
+        """Per-run sentiment/framing with the LLM-free rationale + a raw response
+        excerpt, so the Overview pills can drill into the actual evidence."""
+        with session_scope() as db:
+            rows = [
+                (r.id, r.provider, r.prompt, r.target_sentiment, r.target_framing,
+                 r.framing_rationale, r.raw_json_path)
+                for r in db.scalars(
+                    select(Run).where(Run.project_id == project_id).order_by(Run.created_at.desc())
+                ).all()
+                if r.target_sentiment or r.target_framing
+            ]
+
+        items: list[dict[str, Any]] = []
+        for run_id, provider, prompt, sentiment, framing, rationale, raw_path in rows:
+            excerpt = ""
+            if raw_path:
+                try:
+                    raw = raw_store.read(Path(raw_path).stem)
+                    excerpt = (raw.get("response_text") or "")[:800]
+                except Exception:
+                    excerpt = ""
+            items.append(
+                {
+                    "run_id": run_id,
+                    "provider": provider,
+                    "prompt": prompt,
+                    "sentiment": sentiment,
+                    "framing": framing,
+                    "rationale": rationale or "",
+                    "excerpt": excerpt,
+                }
+            )
+        return {"items": items}

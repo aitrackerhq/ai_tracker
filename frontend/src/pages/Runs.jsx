@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import { api } from "../services/api";
-import { Badge, Card, EmptyState, SectionHeader, Skeleton } from "../components/ui";
+import { Badge, Card, EmptyState, SectionHeader, Skeleton, SentimentBadge } from "../components/ui";
 import { ProjectHeader } from "../components/ProjectHeader";
 import { Eye, X } from "lucide-react";
 
@@ -11,6 +11,7 @@ function statusBadge(status) {
   if (status === "captured") return <Badge tone="info">captured</Badge>;
   if (status === "running") return <Badge tone="warn">running</Badge>;
   if (status === "pending") return <Badge>queued</Badge>;
+  if (status === "purged") return <Badge>purged</Badge>;
   if (status === "error") return <Badge tone="danger">error</Badge>;
   return <Badge>{status}</Badge>;
 }
@@ -41,6 +42,15 @@ function RunModal({ runId, onClose }) {
             {data.error && (
               <div className="mb-4 p-3 rounded bg-accent-red/10 border border-accent-red/30 text-sm text-accent-red">
                 {data.error}
+              </div>
+            )}
+            {(data.target_sentiment || data.target_framing) && (
+              <div className="mb-4 flex items-center gap-2 flex-wrap">
+                <span className="text-xs uppercase tracking-wider text-text-muted">Brand framing:</span>
+                <SentimentBadge sentiment={data.target_sentiment} framing={data.target_framing} />
+                {data.framing_rationale && (
+                  <span className="text-xs text-text-muted">— {data.framing_rationale}</span>
+                )}
               </div>
             )}
             {data.screenshot_path && (
@@ -128,6 +138,7 @@ export default function Runs() {
                   <th className="table-th">Mentions</th>
                   <th className="table-th">Citations</th>
                   <th className="table-th">Target</th>
+                  <th className="table-th">Framing</th>
                   <th className="table-th"></th>
                 </tr>
               </thead>
@@ -137,13 +148,21 @@ export default function Runs() {
                     <td className="table-td whitespace-nowrap text-text-muted">
                       {new Date(r.created_at).toLocaleString()}
                     </td>
-                    <td className="table-td"><Badge>{r.provider}</Badge></td>
+                    <td className="table-td">
+                      <div className="flex items-center gap-1.5">
+                        <Badge>{r.provider}</Badge>
+                        {r.cached && <Badge tone="info">cached</Badge>}
+                      </div>
+                    </td>
                     <td className="table-td max-w-md truncate">{r.prompt}</td>
                     <td className="table-td">{statusBadge(r.status)}</td>
                     <td className="table-td tabular-nums">{r.mention_count}</td>
                     <td className="table-td tabular-nums">{r.citation_count}</td>
                     <td className="table-td">
                       {r.has_target ? <Badge tone="success">yes</Badge> : <Badge>no</Badge>}
+                    </td>
+                    <td className="table-td">
+                      <SentimentBadge sentiment={r.target_sentiment} framing={r.target_framing} />
                     </td>
                     <td className="table-td">
                       <button onClick={() => setOpenRunId(r.id)} className="btn-ghost">

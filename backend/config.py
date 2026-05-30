@@ -19,6 +19,33 @@ class Settings(BaseSettings):
 
     serp_api_key: str = ""
 
+    # Gemini (LLM) — prompt suggestions + competitor detection (NOT sentiment)
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-flash-latest"
+
+    # Sentiment/framing runs locally via a HuggingFace model (no API cost).
+    enable_sentiment: bool = True
+    sentiment_model: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+
+    # Default geo for SerpAPI location-aware results (overridable per project/run)
+    default_geo_location: str = "United States"
+
+    # Artifact lifecycle: purge raw JSON + screenshots + HTML older than this
+    artifact_ttl_days: int = 7
+    cleanup_interval_hours: int = 24
+
+    # Result cache: reuse a recent (project, provider, prompt, geo) capture
+    cache_ttl_hours: int = 24
+
+    # Rate limiting / resilience
+    provider_min_delay_seconds: float = 3.0
+    provider_max_retries: int = 2
+    provider_backoff_base: float = 2.0
+    circuit_breaker_threshold: int = 3
+
+    # Optional proxy (server URL) used for browser providers — proxy rotation hook
+    proxy_url: str = ""
+
     api_host: str = "127.0.0.1"
     api_port: int = 8000
 

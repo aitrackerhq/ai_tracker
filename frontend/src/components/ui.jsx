@@ -38,6 +38,20 @@ export function Skeleton({ className }) {
   return <div className={clsx("skeleton h-4 w-full", className)} />;
 }
 
+export function SentimentBadge({ sentiment, framing }) {
+  if (!sentiment && !framing) return null;
+  const sTone =
+    sentiment === "positive" ? "success" : sentiment === "negative" ? "danger" : "neutral";
+  const fTone =
+    framing === "leader" ? "success" : framing === "cautionary" ? "danger" : "neutral";
+  return (
+    <span className="inline-flex items-center gap-1">
+      {sentiment && sentiment !== "not-mentioned" && <Badge tone={sTone}>{sentiment}</Badge>}
+      {framing && framing !== "not-mentioned" && <Badge tone={fTone}>{framing}</Badge>}
+    </span>
+  );
+}
+
 export function EmptyState({ title, hint }) {
   return (
     <Card className="flex flex-col items-center justify-center text-center py-16">

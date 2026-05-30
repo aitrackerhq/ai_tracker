@@ -1,19 +1,51 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus, ArrowRight, Trash2 } from "lucide-react";
+import { Plus, ArrowRight, Trash2, Sparkles } from "lucide-react";
 
 import { api } from "../services/api";
 import { useFetch } from "../hooks/useFetch";
 import { Badge, Card, EmptyState, SectionHeader, Skeleton } from "../components/ui";
+import { PROVIDERS, PROVIDER_LABELS } from "../services/providers";
 
 function NewProjectForm({ onCreated }) {
   const [name, setName] = useState("");
   const [domain, setDomain] = useState("");
+  const [geo, setGeo] = useState("");
   const [prompts, setPrompts] = useState("");
   const [competitors, setCompetitors] = useState("");
+  const [providers, setProviders] = useState(PROVIDERS);
   const [submitting, setSubmitting] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+
+  const toggleProvider = (p) =>
+    setProviders((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]));
+
+  const promptLines = () =>
+    prompts.split("\n").map((p) => p.trim()).filter(Boolean);
+
+  const generatePrompts = async () => {
+    if (!domain.trim()) {
+      setError("Enter a domain first to generate prompt suggestions.");
+      return;
+    }
+    setSuggesting(true);
+    setError(null);
+    try {
+      const r = await api.suggestPromptsAdhoc({
+        domain: domain.trim(),
+        competitors: competitors.split(",").map((c) => c.trim()).filter(Boolean),
+        existing_prompts: promptLines(),
+      });
+      const merged = [...promptLines(), ...(r.suggestions || [])].slice(0, 5);
+      setPrompts(merged.join("\n"));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSuggesting(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -23,15 +55,13 @@ function NewProjectForm({ onCreated }) {
       const payload = {
         name: name.trim(),
         domain: domain.trim(),
-        prompts: prompts
-          .split("\n")
-          .map((p) => p.trim())
-          .filter(Boolean)
-          .slice(0, 5),
+        prompts: promptLines().slice(0, 5),
         competitors: competitors
           .split(",")
           .map((c) => c.trim())
           .filter(Boolean),
+        geo_location: geo.trim() || null,
+        providers,
       };
       const proj = await api.createProject(payload);
       onCreated?.();
@@ -63,8 +93,34 @@ function NewProjectForm({ onCreated }) {
         </div>
         <div className="md:col-span-2">
           <label className="text-xs uppercase tracking-wider text-text-muted block mb-1">
-            Prompts (one per line, max 5)
+            Geo location (optional)
           </label>
+          <input
+            className="input"
+            value={geo}
+            onChange={(e) => setGeo(e.target.value)}
+            placeholder="United States  ·  London, England  ·  Mumbai, India"
+          />
+          <p className="text-xs text-text-dim mt-1">
+            Used for Google AI Overview / AI Mode location-aware results.
+          </p>
+        </div>
+        <div className="md:col-span-2">
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-xs uppercase tracking-wider text-text-muted">
+              Prompts (one per line, max 5)
+            </label>
+            <button
+              type="button"
+              className="btn-ghost text-xs py-1"
+              onClick={generatePrompts}
+              disabled={suggesting}
+              title="Generate prompt ideas from the domain using AI"
+            >
+              <Sparkles size={13} />
+              {suggesting ? "Generating…" : "Generate with AI"}
+            </button>
+          </div>
           <textarea
             className="input min-h-[120px] font-mono"
             value={prompts}
@@ -83,9 +139,29 @@ function NewProjectForm({ onCreated }) {
             placeholder="clickup, confluence"
           />
         </div>
+        <div className="md:col-span-2">
+          <label className="text-xs uppercase tracking-wider text-text-muted block mb-2">
+            Track across
+          </label>
+          <div className="flex flex-wrap gap-3">
+            {PROVIDERS.map((p) => (
+              <label
+                key={p}
+                className="flex items-center gap-2 text-sm cursor-pointer rounded-md border border-border px-3 py-2 hover:bg-bg-hover"
+              >
+                <input
+                  type="checkbox"
+                  checked={providers.includes(p)}
+                  onChange={() => toggleProvider(p)}
+                />
+                {PROVIDER_LABELS[p]}
+              </label>
+            ))}
+          </div>
+        </div>
         {error && <div className="md:col-span-2 text-sm text-accent-red">{error}</div>}
         <div className="md:col-span-2 flex justify-end">
-          <button className="btn-primary" type="submit" disabled={submitting}>
+          <button className="btn-primary" type="submit" disabled={submitting || !providers.length}>
             <Plus size={16} />
             {submitting ? "Creating…" : "Create project"}
           </button>

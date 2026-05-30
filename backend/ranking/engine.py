@@ -92,7 +92,8 @@ class RankingEngine:
                             stats[name].citations += 1
                             break
 
-            total_prompts = len(prompts_total) or 1
+            prompt_count = len(prompts_total)        # real value for display
+            denom = prompt_count or 1                 # div-by-zero guard for scoring
             brand_rows = []
             for name, s in stats.items():
                 brand_rows.append(
@@ -105,7 +106,7 @@ class RankingEngine:
                         "avg_position": s.avg_position(),
                         "first_mentions": s.first_mentions,
                         "citations": s.citations,
-                        "visibility_score": s.visibility_score(total_prompts),
+                        "visibility_score": s.visibility_score(denom),
                     }
                 )
             brand_rows.sort(key=lambda x: x["visibility_score"], reverse=True)
@@ -113,7 +114,7 @@ class RankingEngine:
             target_row = next((b for b in brand_rows if b["is_target"]), None)
             return {
                 "project_id": self.project_id,
-                "total_prompts": total_prompts,
+                "total_prompts": prompt_count,
                 "total_runs": len(runs),
                 "target": target_row,
                 "brands": brand_rows,

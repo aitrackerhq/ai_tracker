@@ -8,7 +8,8 @@ import httpx
 
 from backend.config import settings
 from backend.providers.base import BaseProvider, CaptureResult, ProviderError
-from backend.utils.helpers import collapse_ws, domain_from_url, utc_now_iso
+from backend.providers.serpapi_common import extract_references, flatten_text_blocks
+from backend.utils.helpers import domain_from_url, utc_now_iso
 
 logger = logging.getLogger(__name__)
 
@@ -84,17 +85,17 @@ class GoogleAIOverviewProvider(BaseProvider):
         """Run the two-step SerpAPI flow. Returns (ai_overview, full_search_json)."""
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Step 1 — normal Google search
-            step1 = await self._get(
-                client,
-                {
-                    "engine": "google",
-                    "q": query,
-                    "api_key": settings.serp_api_key,
-                    "hl": "en",
-                    "gl": "us",
-                    "num": 10,
-                },
-            )
+            params: dict[str, Any] = {
+                "engine": "google",
+                "q": query,
+                "api_key": settings.serp_api_key,
+                "hl": "en",
+                "gl": "us",
+                "num": 10,
+            }
+            if self.geo_location:
+                params["location"] = self.geo_location
+            step1 = await self._get(client, params)
             ai_overview = dict(step1.get("ai_overview") or {})
 
             # Step 2 — if Google deferred the overview, fetch it via page_token
@@ -135,61 +136,10 @@ class GoogleAIOverviewProvider(BaseProvider):
     # ------------------------------------------------------------------ parse
 
     def _extract_text(self, ai_overview: dict[str, Any]) -> str:
-        blocks = ai_overview.get("text_blocks") or []
-        lines = self._render_blocks(blocks)
-        return "\n".join(lines).strip()
-
-    def _render_blocks(self, blocks: list[dict[str, Any]]) -> list[str]:
-        """Recursively flatten SerpAPI text_blocks into readable lines.
-
-        Block types seen in the API: paragraph, heading, list, expandable,
-        comparison. Lists carry `list` items (title + snippet) and any type can
-        carry nested `text_blocks`.
-        """
-        out: list[str] = []
-        for block in blocks:
-            btype = block.get("type", "")
-            snippet = collapse_ws(block.get("snippet") or "")
-
-            if btype == "list":
-                for item in block.get("list") or []:
-                    title = collapse_ws(item.get("title") or "")
-                    isnip = collapse_ws(item.get("snippet") or "")
-                    line = ": ".join(x for x in (title, isnip) if x)
-                    if line:
-                        out.append(f"• {line}")
-                    nested_item = item.get("text_blocks")
-                    if nested_item:
-                        out.extend(self._render_blocks(nested_item))
-            elif snippet:
-                out.append(snippet)
-
-            # nested blocks (e.g. expandable / comparison containers)
-            if btype != "list":
-                nested = block.get("text_blocks")
-                if nested:
-                    out.extend(self._render_blocks(nested))
-        return out
+        return flatten_text_blocks(ai_overview.get("text_blocks") or [])
 
     def _extract_citations(self, ai_overview: dict[str, Any]) -> list[dict[str, Any]]:
-        """Citations live in `references`; fall back to `sources` for older shapes."""
-        citations: list[dict[str, Any]] = []
-        seen: set[str] = set()
-        refs = ai_overview.get("references") or ai_overview.get("sources") or []
-        for ref in refs:
-            url = ref.get("link") or ref.get("url") or ""
-            if not url or url in seen:
-                continue
-            seen.add(url)
-            citations.append(
-                {
-                    "title": ref.get("title") or "",
-                    "url": url,
-                    "domain": domain_from_url(url),
-                    "source": ref.get("source") or "",
-                }
-            )
-        return citations
+        return extract_references(ai_overview)
 
     def _extract_organic_links(self, raw: dict[str, Any]) -> list[dict[str, Any]]:
         links: list[dict[str, Any]] = []
