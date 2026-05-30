@@ -1,15 +1,20 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { useFetch } from "../hooks/useFetch";
 import { api } from "../services/api";
-import { Card, EmptyState, SectionHeader, Skeleton, Stat, Badge } from "../components/ui";
+import { Card, EmptyState, SectionHeader, Skeleton, Stat, Badge, SentimentBadge } from "../components/ui";
 import { ProjectHeader } from "../components/ProjectHeader";
 import { CaptureProgress } from "../components/CaptureProgress";
+import { PromptSuggestions } from "../components/PromptSuggestions";
+import { FramingContextModal } from "../components/FramingContextModal";
 import { BrandsBarChart, ProvidersPieChart, VisibilityTrendChart } from "../charts/Charts";
 
 export default function Overview() {
   const { projectId } = useParams();
   const { data, loading, reload } = useFetch(() => api.overview(projectId), [projectId]);
   const { data: trend } = useFetch(() => api.timeseries(projectId), [projectId]);
+  const { data: framingCtx } = useFetch(() => api.framingContext(projectId), [projectId]);
+  const [framingFilter, setFramingFilter] = useState(null);
 
   if (loading) {
     return (
@@ -81,6 +86,58 @@ export default function Overview() {
         )}
       </Card>
 
+      {(Object.keys(data.sentiment || {}).length > 0 ||
+        Object.keys(data.framing || {}).length > 0) && (
+        <Card className="mb-8">
+          <SectionHeader
+            title="Brand framing"
+            subtitle={`How AI answers portray ${data.target_brand || "your brand"}`}
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <div className="text-xs uppercase tracking-wider text-text-muted mb-2">Sentiment</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(data.sentiment || {}).map(([k, v]) => (
+                  <button
+                    key={k}
+                    onClick={() => setFramingFilter({ type: "sentiment", value: k })}
+                    className="transition-transform hover:scale-105"
+                    title="Click to see the raw context"
+                  >
+                    <Badge
+                      tone={k === "positive" ? "success" : k === "negative" ? "danger" : "neutral"}
+                    >
+                      {k}: {v}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="text-xs uppercase tracking-wider text-text-muted mb-2">Framing</div>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(data.framing || {}).map(([k, v]) => (
+                  <button
+                    key={k}
+                    onClick={() => setFramingFilter({ type: "framing", value: k })}
+                    className="transition-transform hover:scale-105"
+                    title="Click to see the raw context"
+                  >
+                    <Badge
+                      tone={k === "leader" ? "success" : k === "cautionary" ? "danger" : "neutral"}
+                    >
+                      {k}: {v}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <PromptSuggestions projectId={projectId} onAdded={reload} />
+
       <Card>
         <SectionHeader title="Top brands" />
         <div className="overflow-x-auto">
@@ -119,6 +176,12 @@ export default function Overview() {
           </table>
         </div>
       </Card>
+
+      <FramingContextModal
+        filter={framingFilter}
+        items={framingCtx?.items}
+        onClose={() => setFramingFilter(null)}
+      />
     </div>
   );
 }

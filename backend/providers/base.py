@@ -48,8 +48,9 @@ class BaseProvider:
 
     name: str = "base"
 
-    def __init__(self, context: BrowserContext):
+    def __init__(self, context: BrowserContext | None, geo_location: str | None = None):
         self.context = context
+        self.geo_location = geo_location
         self.page: Page | None = None
 
     async def initialize(self) -> None:

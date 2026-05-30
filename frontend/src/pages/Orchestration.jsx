@@ -19,7 +19,9 @@ import { ProjectHeader } from "../components/ProjectHeader";
 const PROVIDER_LABEL = {
   chatgpt: "ChatGPT",
   gemini: "Gemini",
+  perplexity: "Perplexity",
   google_ai: "Google AI Overview",
+  google_ai_mode: "Google AI Mode",
 };
 
 function StageIcon({ status }) {
@@ -87,8 +89,14 @@ function RunFlow({ run }) {
             {PROVIDER_LABEL[run.provider] || run.provider}
           </div>
           <div className="text-sm font-medium truncate">{run.prompt}</div>
+          {run.geo_location && (
+            <div className="text-xs text-text-dim mt-0.5">{run.geo_location}</div>
+          )}
         </div>
-        {overallBadge(run.status)}
+        <div className="flex items-center gap-1.5">
+          {run.cached && <Badge tone="info">cached</Badge>}
+          {overallBadge(run.status)}
+        </div>
       </div>
 
       <div className="relative pl-3">

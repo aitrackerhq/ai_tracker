@@ -7,7 +7,9 @@ import { Card, SectionHeader, Badge } from "./ui";
 const PROVIDER_LABEL = {
   chatgpt: "ChatGPT",
   gemini: "Gemini",
+  perplexity: "Perplexity",
   google_ai: "Google AI Overview",
+  google_ai_mode: "Google AI Mode",
 };
 
 const ACTIVE = new Set(["pending", "running", "captured"]);

@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { useParams } from "react-router-dom";
 import { Users, Search, Sparkles } from "lucide-react";
 import { useFetch } from "../hooks/useFetch";
 import { api } from "../services/api";
-import { Badge, Card, EmptyState, SectionHeader, Skeleton } from "../components/ui";
+import { Badge, Card, SectionHeader, Skeleton } from "../components/ui";
 import { ProjectHeader } from "../components/ProjectHeader";
 
 function fmt(ts) {
@@ -29,10 +30,10 @@ function TimelineRow({ icon: Icon, title, meta, when }) {
   );
 }
 
-function HistoryColumn({ heading, icon, items, emptyText, render }) {
+function HistoryColumn({ heading, items, emptyText, render, right }) {
   return (
     <Card>
-      <SectionHeader title={heading} />
+      <SectionHeader title={heading} right={right} />
       {!items?.length ? (
         <div className="text-sm text-text-muted py-8 text-center">{emptyText}</div>
       ) : (
@@ -48,9 +49,25 @@ function HistoryColumn({ heading, icon, items, emptyText, render }) {
 export default function History() {
   const { projectId } = useParams();
   const { data, loading, reload } = useFetch(() => api.history(projectId), [projectId]);
+  const [detecting, setDetecting] = useState(false);
+  const [msg, setMsg] = useState(null);
 
   const manual = (data?.competitors || []).filter((c) => !c.inferred);
   const autoDetected = (data?.competitors || []).filter((c) => c.inferred);
+
+  const detect = async () => {
+    setDetecting(true);
+    setMsg(null);
+    try {
+      const r = await api.detectCompetitors(projectId);
+      setMsg(`Added ${r.added.length} competitor${r.added.length === 1 ? "" : "s"}`);
+      reload();
+    } catch (e) {
+      setMsg(e.message);
+    } finally {
+      setDetecting(false);
+    }
+  };
 
   const renderCompetitor = (icon) => (c, i) =>
     <TimelineRow key={i} icon={icon} title={c.name} when={c.created_at} />;
@@ -87,10 +104,18 @@ export default function History() {
                   <Badge tone="info">{autoDetected.length}</Badge>
                 </span>
               }
-              icon={Sparkles}
               items={autoDetected}
               emptyText="No auto-detected competitors yet."
               render={renderCompetitor(Sparkles)}
+              right={
+                <div className="flex items-center gap-2">
+                  {msg && <span className="text-xs text-text-muted">{msg}</span>}
+                  <button className="btn-outline" onClick={detect} disabled={detecting}>
+                    <Sparkles size={14} />
+                    {detecting ? "Detecting…" : "Auto-detect (AI)"}
+                  </button>
+                </div>
+              }
             />
           </div>
 
