@@ -16,3 +16,4 @@ httpx>=0.27.0
 # Local sentiment model (optional — falls back to a lexicon if not installed)
 transformers>=4.44.0
 torch>=2.2.0
+psycopg[binary]>=3.3.4
