@@ -112,11 +112,13 @@ class R2Backend:
             str(local_path), self.bucket, key,
             ExtraArgs={"ContentType": _CONTENT_TYPE.get(ext, "application/octet-stream")},
         )
-        # local file was a temp staging copy — remove it now that it's in R2
+        # local file was a temp staging copy — remove it now that it's in R2.
+        # Best-effort: a leftover temp file must not fail the (successful) upload.
         try:
             Path(local_path).unlink(missing_ok=True)
         except Exception:
-            pass
+            logger.debug("could not remove local staging file %s after R2 upload",
+                         local_path, exc_info=True)
         return f"{_R2_PREFIX}{key}"
 
     def load_json(self, ref: str) -> dict[str, Any]:
