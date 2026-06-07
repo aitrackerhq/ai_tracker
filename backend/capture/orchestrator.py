@@ -148,11 +148,8 @@ def find_cached_run(
         ).all()
         for r in candidates:
             if (r.geo_location or None) == (geo_location or None):
-                return {
-                    "raw_json_path": r.raw_json_path,
-                    "screenshot_path": r.screenshot_path,
-                    "html_path": r.html_path,
-                }
+                # only raw_json_path is reused; cached runs don't share heavy artifacts
+                return {"raw_json_path": r.raw_json_path}
     return None
 
 

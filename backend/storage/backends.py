@@ -153,11 +153,14 @@ class R2Backend:
     def delete(self, ref: str) -> bool:
         if not self._is_r2(ref):  # legacy local-path ref
             return self._local.delete(ref)
+        from botocore.exceptions import ClientError
+
         try:
             self.client.delete_object(Bucket=self.bucket, Key=self._key(ref))
             return True
-        except Exception:
-            logger.warning("r2 delete failed: %s", ref)
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            logger.warning("r2 delete failed: %s (code=%s)", ref, code)
             return False
 
     def url(self, ref: str) -> str | None:
