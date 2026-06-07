@@ -9,7 +9,7 @@ from datetime import datetime
 from backend.database.session import engine, session_scope
 from backend.models import Base, Citation, Competitor, Mention, Project, Prompt, Run
 from backend.processing.pipeline import process_run
-from backend.storage import raw_store
+from backend.storage import backends as storage
 from backend.utils.helpers import new_run_id
 
 
@@ -64,13 +64,13 @@ def seed() -> int:
             "html_path": None,
             "has_ai_overview": True if provider == "google_ai" else None,
         }
-        raw_store.write(run_uid, payload)
+        raw_ref = storage.put_json("raw", run_uid, payload)
         with session_scope() as db:
             r = Run(
                 project_id=project_id,
                 provider=provider,
                 prompt=payload["prompt"],
-                raw_json_path=str(raw_store.path_for(run_uid)),
+                raw_json_path=raw_ref,
                 status="captured",
             )
             db.add(r)

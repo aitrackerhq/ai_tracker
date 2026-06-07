@@ -23,3 +23,5 @@ frontend/dist/
 frontend/.vite/
 
 .DS_Store
+# logs
+*.log

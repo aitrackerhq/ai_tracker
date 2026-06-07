@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
-from pathlib import Path
 
 from sqlalchemy import select
 
 from backend.config import settings
 from backend.database.session import session_scope
 from backend.models import Run
+from backend.storage.backends import delete_ref
 
 logger = logging.getLogger(__name__)
 
@@ -16,22 +16,9 @@ logger = logging.getLogger(__name__)
 _ARTIFACT_ATTRS = ("raw_json_path", "processed_json_path", "screenshot_path", "html_path")
 
 
-def _safe_unlink(path_str: str | None) -> bool:
-    if not path_str:
-        return False
-    try:
-        p = Path(path_str)
-        if p.exists():
-            p.unlink()
-            return True
-    except Exception:
-        logger.warning("failed to delete artifact: %s", path_str)
-    return False
-
-
 def purge_run_files(run) -> int:
-    """Delete all on-disk artifacts referenced by a Run row. Returns files removed."""
-    return sum(1 for attr in _ARTIFACT_ATTRS if _safe_unlink(getattr(run, attr, None)))
+    """Delete all artifacts (local disk or R2) referenced by a Run row."""
+    return sum(1 for attr in _ARTIFACT_ATTRS if delete_ref(getattr(run, attr, None)))
 
 
 def purge_expired(ttl_days: int | None = None) -> dict[str, int]:
@@ -51,16 +38,12 @@ def purge_expired(ttl_days: int | None = None) -> dict[str, int]:
             select(Run).where(Run.created_at < cutoff, Run.status != "purged")
         ).all()
         for run in stale:
-            removed = False
-            for attr in ("raw_json_path", "processed_json_path", "screenshot_path", "html_path"):
-                path = getattr(run, attr, None)
-                if _safe_unlink(path):
+            for attr in _ARTIFACT_ATTRS:
+                if delete_ref(getattr(run, attr, None)):
                     deleted_files += 1
-                    removed = True
                 setattr(run, attr, None)
             run.status = "purged"
-            if removed or True:
-                purged_runs += 1
+            purged_runs += 1
 
     logger.info("artifact purge: %d runs, %d files removed (ttl=%dd)", purged_runs, deleted_files, ttl_days)
     return {"runs_purged": purged_runs, "files_deleted": deleted_files, "ttl_days": ttl_days}

@@ -17,10 +17,14 @@ class Settings(BaseSettings):
     stream_settle_seconds: int = 3
     headless: bool = False
 
+    # SerpAPI — single key, or comma-separated list for rotation (serp_api_keys)
     serp_api_key: str = ""
+    serp_api_keys: str = ""
 
     # Gemini (LLM) — prompt suggestions + competitor detection (NOT sentiment)
+    # gemini_api_key is a single key; gemini_api_keys is a comma-separated rotation list
     gemini_api_key: str = ""
+    gemini_api_keys: str = ""
     gemini_model: str = "gemini-flash-latest"
 
     # Sentiment/framing runs locally via a HuggingFace model (no API cost).
@@ -45,6 +49,28 @@ class Settings(BaseSettings):
 
     # Optional proxy (server URL) used for browser providers — proxy rotation hook
     proxy_url: str = ""
+
+    # Celery / Redis — when broker is set, captures run on workers; else inline
+    celery_broker_url: str = ""
+    celery_result_backend: str = ""
+
+    # Cloudflare R2 (S3-compatible) — when configured, artifacts go to the bucket
+    # instead of local disk. Leave blank to use local ./storage.
+    r2_account_id: str = ""
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = ""
+    r2_endpoint_url: str = ""          # defaults to https://<account>.r2.cloudflarestorage.com
+    r2_public_base_url: str = ""       # optional public/CDN base for serving artifacts
+
+    @property
+    def r2_enabled(self) -> bool:
+        return bool(self.r2_access_key_id and self.r2_secret_access_key and self.r2_bucket
+                    and (self.r2_account_id or self.r2_endpoint_url))
+
+    @property
+    def celery_enabled(self) -> bool:
+        return bool(self.celery_broker_url)
 
     api_host: str = "127.0.0.1"
     api_port: int = 8000

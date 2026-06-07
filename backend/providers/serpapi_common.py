@@ -1,10 +1,66 @@
-"""Shared parsing for SerpAPI responses that carry `text_blocks` + `references`
-(Google AI Overview and Google AI Mode share this shape)."""
+"""Shared SerpAPI helpers: key rotation, request, and parsing for responses that
+carry `text_blocks` + `references` (Google AI Overview and Google AI Mode)."""
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+import httpx
+
+from backend.config import settings
 from backend.utils.helpers import collapse_ws, domain_from_url
+from backend.utils.key_rotation import KeyRotator, parse_keys
+
+logger = logging.getLogger(__name__)
+
+SERPAPI_ENDPOINT = "https://serpapi.com/search"
+
+# Rotates across SERP_API_KEYS (comma list) or the single SERP_API_KEY.
+serp_keys = KeyRotator(parse_keys(settings.serp_api_keys, settings.serp_api_key))
+
+# error-text fragments that mean "this key is out of quota" → try the next one
+_QUOTA_HINTS = ("run out of searches", "ran out of searches", "exceeded", "plan limit",
+                "out of searches", "account has no searches")
+
+
+class SerpAPIError(Exception):
+    pass
+
+
+def is_configured() -> bool:
+    return bool(serp_keys)
+
+
+async def serpapi_get(client: httpx.AsyncClient, params: dict[str, Any]) -> dict[str, Any]:
+    """GET SerpAPI, injecting + rotating the api_key on quota/auth failures."""
+    if not serp_keys:
+        raise SerpAPIError("No SERP API key configured (set SERP_API_KEY or SERP_API_KEYS)")
+    last_err = "unknown error"
+    for key in serp_keys.ordered_from_current():
+        q = {**params, "api_key": key}
+        try:
+            resp = await client.get(SERPAPI_ENDPOINT, params=q)
+        except httpx.HTTPError as exc:
+            last_err = f"request failed: {exc}"
+            continue
+        if resp.status_code == 401:
+            last_err = "401 (invalid key)"
+            serp_keys.advance()
+            continue
+        try:
+            data = resp.json()
+        except Exception:
+            raise SerpAPIError(f"SerpAPI returned non-JSON (status {resp.status_code})")
+        err = (data.get("error") or "") if isinstance(data, dict) else ""
+        if err and any(h in err.lower() for h in _QUOTA_HINTS):
+            last_err = err
+            logger.warning("SerpAPI key out of quota, rotating: %s", err)
+            serp_keys.advance()
+            continue
+        if err:
+            raise SerpAPIError(f"SerpAPI error: {err}")
+        return data
+    raise SerpAPIError(f"All SERP API keys failed: {last_err}")
 
 
 def flatten_text_blocks(blocks: list[dict[str, Any]]) -> str:

@@ -6,7 +6,6 @@ import uuid
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import AsyncIterator
 
 from sqlalchemy import select
@@ -33,7 +32,7 @@ from backend.models import Run
 from backend.processing.pipeline import process_run
 from backend.providers import PROVIDER_REGISTRY, BaseProvider
 from backend.providers.stealth import USER_AGENT, apply_stealth
-from backend.storage import raw_store
+from backend.storage import backends as storage
 from backend.utils.helpers import new_run_id
 
 logger = logging.getLogger(__name__)
@@ -282,13 +281,24 @@ class CaptureOrchestrator:
             self._set_status(run_pk, "running")
             await provider.initialize()
             result = await provider.capture(prompt, run_uid)
-            raw_path = raw_store.write(run_uid, result.to_dict())
+            # persist artifacts through the storage backend (local disk or R2)
+            raw_ref = storage.put_json("raw", run_uid, result.to_dict())
+            screenshot_ref = (
+                storage.put_artifact("screenshots", run_uid, result.screenshot_path)
+                if result.screenshot_path
+                else None
+            )
+            html_ref = (
+                storage.put_artifact("html", run_uid, result.html_path)
+                if result.html_path
+                else None
+            )
             with session_scope() as db:
                 run = db.get(Run, run_pk)
                 if run is not None:
-                    run.raw_json_path = str(raw_path)
-                    run.screenshot_path = result.screenshot_path
-                    run.html_path = result.html_path
+                    run.raw_json_path = raw_ref
+                    run.screenshot_path = screenshot_ref
+                    run.html_path = html_ref
                     run.status = "captured"
             process_run(run_pk)  # NER + ranking + local sentiment (processing layer)
             self._set_status(run_pk, "processed")
@@ -297,14 +307,13 @@ class CaptureOrchestrator:
 
     async def _reuse_cached(self, run_pk: int, cached: dict) -> None:
         """Reuse a prior run's raw artifact instead of re-capturing."""
-        stem = Path(cached["raw_json_path"]).stem
-        raw_data = raw_store.read(stem)
+        raw_data = storage.load_json(cached["raw_json_path"])
         new_uid = new_run_id()
-        new_path = raw_store.write(new_uid, raw_data)
+        new_ref = storage.put_json("raw", new_uid, raw_data)
         with session_scope() as db:
             run = db.get(Run, run_pk)
             if run is not None:
-                run.raw_json_path = str(new_path)
+                run.raw_json_path = new_ref
                 # reference the existing heavy artifacts (don't duplicate files)
                 run.screenshot_path = cached.get("screenshot_path")
                 run.html_path = cached.get("html_path")

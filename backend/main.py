@@ -18,37 +18,55 @@ logger = logging.getLogger(__name__)
 
 
 def _ensure_columns() -> None:
-    """Lightweight SQLite-only migration: add columns introduced after a DB was
-    first created. SQLite allows ADD COLUMN; nullable so existing rows stay valid.
+    """Lightweight dialect-aware migration: add columns introduced after a DB was
+    first created. Fresh DBs are fully created by create_all; this only upgrades
+    existing ones in place. For complex Postgres migrations, prefer Alembic.
     """
-    pending = {
+    dialect = engine.dialect.name
+    dt = "DATETIME" if dialect == "sqlite" else "TIMESTAMP"
+    # logical (column, type) per table — types are portable across SQLite/Postgres
+    # ("BOOLEAN DEFAULT FALSE" works on SQLite >= 3.23 and Postgres).
+    pending: dict[str, list[tuple[str, str]]] = {
         "runs": [
-            ("batch_id", "ALTER TABLE runs ADD COLUMN batch_id VARCHAR(64)"),
-            ("geo_location", "ALTER TABLE runs ADD COLUMN geo_location VARCHAR(128)"),
-            ("cached", "ALTER TABLE runs ADD COLUMN cached BOOLEAN DEFAULT 0"),
-            ("target_sentiment", "ALTER TABLE runs ADD COLUMN target_sentiment VARCHAR(32)"),
-            ("target_framing", "ALTER TABLE runs ADD COLUMN target_framing VARCHAR(32)"),
-            ("framing_rationale", "ALTER TABLE runs ADD COLUMN framing_rationale TEXT"),
+            ("batch_id", "VARCHAR(64)"),
+            ("geo_location", "VARCHAR(128)"),
+            ("cached", "BOOLEAN DEFAULT FALSE"),
+            ("target_sentiment", "VARCHAR(32)"),
+            ("target_framing", "VARCHAR(32)"),
+            ("framing_rationale", "TEXT"),
         ],
-        "prompts": [("created_at", "ALTER TABLE prompts ADD COLUMN created_at DATETIME")],
-        "competitors": [("created_at", "ALTER TABLE competitors ADD COLUMN created_at DATETIME")],
-        "projects": [
-            ("geo_location", "ALTER TABLE projects ADD COLUMN geo_location VARCHAR(128)"),
-            ("providers", "ALTER TABLE projects ADD COLUMN providers VARCHAR(255)"),
-        ],
+        "prompts": [("created_at", dt)],
+        "competitors": [("created_at", dt)],
+        "projects": [("geo_location", "VARCHAR(128)"), ("providers", "VARCHAR(255)")],
     }
+
+    def _existing(conn, table: str) -> set[str] | None:
+        try:
+            if dialect == "sqlite":
+                rows = conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+                return {r[1] for r in rows} or None
+            rows = conn.exec_driver_sql(
+                f"SELECT column_name FROM information_schema.columns WHERE table_name='{table}'"
+            ).fetchall()
+            return {r[0] for r in rows} or None
+        except Exception:
+            return None
+
     with engine.begin() as conn:
         for table, cols in pending.items():
-            try:
-                existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()}
-            except Exception:
+            existing = _existing(conn, table)
+            if existing is None:  # table not created yet → create_all handles it
                 continue
-            if not existing:  # table doesn't exist yet (fresh DB handled by create_all)
-                continue
-            for col, ddl in cols:
-                if col not in existing:
-                    logger.info("migrating: %s", ddl)
-                    conn.exec_driver_sql(ddl)
+            for col, coltype in cols:
+                if dialect == "sqlite":
+                    if col not in existing:
+                        logger.info("migrating sqlite: add %s.%s", table, col)
+                        conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col} {coltype}")
+                elif col not in existing:
+                    logger.info("migrating %s: add %s.%s", dialect, table, col)
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coltype}"
+                    )
 
 
 async def _cleanup_loop() -> None:

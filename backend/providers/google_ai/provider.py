@@ -6,14 +6,17 @@ from typing import Any
 
 import httpx
 
-from backend.config import settings
 from backend.providers.base import BaseProvider, CaptureResult, ProviderError
-from backend.providers.serpapi_common import extract_references, flatten_text_blocks
+from backend.providers.serpapi_common import (
+    SerpAPIError,
+    extract_references,
+    flatten_text_blocks,
+    is_configured,
+    serpapi_get,
+)
 from backend.utils.helpers import domain_from_url, utc_now_iso
 
 logger = logging.getLogger(__name__)
-
-SERPAPI_ENDPOINT = "https://serpapi.com/search"
 
 
 class GoogleAIOverviewProvider(BaseProvider):
@@ -37,10 +40,10 @@ class GoogleAIOverviewProvider(BaseProvider):
     name = "google_ai"
 
     async def initialize(self) -> None:
-        if not settings.serp_api_key:
+        if not is_configured():
             raise ProviderError(
-                "SERP_API_KEY is not set. "
-                "Get a free key at https://serpapi.com/manage-api-key and add it to .env"
+                "No SERP API key configured. Set SERP_API_KEY or SERP_API_KEYS in .env "
+                "(https://serpapi.com/manage-api-key)."
             )
 
     async def capture(self, prompt: str, run_id: str) -> CaptureResult:
@@ -84,32 +87,33 @@ class GoogleAIOverviewProvider(BaseProvider):
     async def _fetch(self, query: str) -> tuple[dict[str, Any], dict[str, Any]]:
         """Run the two-step SerpAPI flow. Returns (ai_overview, full_search_json)."""
         async with httpx.AsyncClient(timeout=60.0) as client:
-            # Step 1 — normal Google search
+            # Step 1 — normal Google search (key injected + rotated by serpapi_get)
             params: dict[str, Any] = {
                 "engine": "google",
                 "q": query,
-                "api_key": settings.serp_api_key,
                 "hl": "en",
                 "gl": "us",
                 "num": 10,
             }
             if self.geo_location:
                 params["location"] = self.geo_location
-            step1 = await self._get(client, params)
+            try:
+                step1 = await serpapi_get(client, params)
+            except SerpAPIError as exc:
+                raise ProviderError(str(exc)) from exc
             ai_overview = dict(step1.get("ai_overview") or {})
 
             # Step 2 — if Google deferred the overview, fetch it via page_token
             page_token = ai_overview.get("page_token")
             if page_token and not ai_overview.get("text_blocks"):
                 logger.info("google_ai: deferred overview, fetching via page_token")
-                step2 = await self._get(
-                    client,
-                    {
-                        "engine": "google_ai_overview",
-                        "page_token": page_token,
-                        "api_key": settings.serp_api_key,
-                    },
-                )
+                try:
+                    step2 = await serpapi_get(
+                        client,
+                        {"engine": "google_ai_overview", "page_token": page_token},
+                    )
+                except SerpAPIError as exc:
+                    raise ProviderError(str(exc)) from exc
                 ov2 = step2.get("ai_overview") or {}
                 if ov2.get("text_blocks"):
                     ov2 = dict(ov2)
@@ -117,21 +121,6 @@ class GoogleAIOverviewProvider(BaseProvider):
                     return ov2, step1
 
             return ai_overview, step1
-
-    async def _get(self, client: httpx.AsyncClient, params: dict[str, Any]) -> dict[str, Any]:
-        try:
-            resp = await client.get(SERPAPI_ENDPOINT, params=params)
-        except httpx.HTTPError as exc:
-            raise ProviderError(f"SerpAPI request failed: {exc}") from exc
-        if resp.status_code == 401:
-            raise ProviderError("SerpAPI rejected the API key (401). Check SERP_API_KEY.")
-        try:
-            data = resp.json()
-        except Exception as exc:
-            raise ProviderError(f"SerpAPI returned non-JSON (status {resp.status_code})") from exc
-        if isinstance(data, dict) and data.get("error"):
-            raise ProviderError(f"SerpAPI error: {data['error']}")
-        return data
 
     # ------------------------------------------------------------------ parse
 
