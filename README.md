@@ -5,8 +5,8 @@ Perplexity, Google AI Overviews, and Google AI Mode — measuring visibility,
 sentiment/framing, citations, and competitors.
 
 > Runs locally with **zero external services** (SQLite + local disk + in-process
-> tasks), and scales up to **Postgres + Celery/Redis + Cloudflare R2** purely by
-> setting env vars. Each piece is pluggable with a graceful fallback.
+> tasks), and scales up to **Postgres + Celery/Redis + Supabase Storage** purely
+> by setting env vars. Each piece is pluggable with a graceful fallback.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ sentiment/framing, citations, and competitors.
    (enqueue job)      │  ranking → local sentiment → LLM competitors   │       (or SQLite)
         ▲             └────────────────────────────────────────────────┘            │
         │                              artifacts ▼                                   │
-   React dashboard  ◄────── Analytics API ◄──── Cloudflare R2 (or local ./storage) ◄┘
+   React dashboard  ◄────── Analytics API ◄──── Supabase Storage (or local ./storage) ◄┘
 ```
 
 When no broker is configured the capture runs as an in-process background task
@@ -27,7 +27,7 @@ Layers (all decoupled):
 - `backend/providers/*` — capture adapters: Playwright (chatgpt/gemini/perplexity) + SerpAPI (google_ai/google_ai_mode).
 - `backend/capture/` — orchestrator (rate limit, backoff, circuit breaker, cache) + LLM competitor detection.
 - `backend/tasks/` — Celery app + dispatcher (falls back to FastAPI BackgroundTasks).
-- `backend/storage/` — pluggable artifact backend: local disk **or** Cloudflare R2 (S3).
+- `backend/storage/` — pluggable artifact backend: local disk **or** Supabase Storage (S3).
 - `backend/processing/` — spaCy NER + rapidfuzz normalization + local HF sentiment.
 - `backend/ranking/` — visibility / position / citation scoring.
 - `backend/llm/` — Gemini client (key rotation) for prompt suggestions + competitor detection.
@@ -39,7 +39,7 @@ Layers (all decoupled):
 | ----------------- | ------------------------------------------------------- | ------------------------------ |
 | **Postgres**      | `DATABASE_URL=postgresql+psycopg://…`                   | SQLite (`sqlite:///…`)         |
 | **Celery/Redis**  | `CELERY_BROKER_URL=redis://…`                           | in-process BackgroundTasks     |
-| **Cloudflare R2** | `R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET` | local `./storage`     |
+| **Supabase Storage** | `SUPABASE_PROJECT_REF/SUPABASE_S3_REGION/SUPABASE_S3_ACCESS_KEY_ID/SUPABASE_S3_SECRET_ACCESS_KEY/SUPABASE_STORAGE_BUCKET` | local `./storage` |
 | **Key rotation**  | `SERP_API_KEYS=a,b,c` · `GEMINI_API_KEYS=a,b,c`         | single `SERP_API_KEY`/`GEMINI_API_KEY` |
 
 Start a worker (when using Celery):
@@ -54,8 +54,13 @@ celery -A backend.tasks.celery_app worker --loglevel=info
   transaction mode) and enables `pool_pre_ping`. Schema is created automatically;
   a dialect-aware in-place column migration runs at startup (use Alembic for
   anything heavier).
-- *R2*: artifacts are written under `raw/ processed/ screenshots/ html/` keys and
-  served via presigned URLs (or `R2_PUBLIC_BASE_URL` if you front it with a CDN).
+- *Supabase Storage*: create a bucket and generate S3 access keys
+  (Storage → Settings → S3 access keys). Endpoint is derived from
+  `SUPABASE_PROJECT_REF` (`https://<ref>.storage.supabase.co/storage/v1/s3`) or
+  set `SUPABASE_S3_ENDPOINT` directly; `SUPABASE_S3_REGION` is the project region
+  (e.g. `ap-northeast-1`). Artifacts are written under `raw/ processed/
+  screenshots/ html/` keys and served via presigned URLs, or public object URLs
+  if the bucket is public and `SUPABASE_STORAGE_PUBLIC=true`.
 - *Key rotation*: round-robins keys and advances to the next on quota/`429`/`401`.
 
 ### Run with the task queue live (local)

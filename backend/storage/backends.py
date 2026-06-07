@@ -1,10 +1,11 @@
-"""Pluggable artifact storage: local disk or Cloudflare R2 (S3-compatible).
+"""Pluggable artifact storage: local disk or Supabase Storage (S3-compatible).
 
 A "ref" is an opaque string stored in the DB:
-  - local backend: a filesystem path (back-compat with existing data)
-  - R2 backend:    "r2://<key>"  (e.g. "r2://raw/<uid>.json")
+  - local backend:    a filesystem path (back-compat with existing data)
+  - Supabase backend: "s3://<key>"  (e.g. "s3://raw/<uid>.json")
 
-Selected automatically: R2 when configured (settings.r2_enabled), else local.
+Selected automatically: Supabase when configured (settings.storage_enabled),
+else local. (Legacy "r2://" refs are still recognized as remote.)
 """
 from __future__ import annotations
 
@@ -17,7 +18,8 @@ from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
-_R2_PREFIX = "r2://"
+_S3_PREFIX = "s3://"
+_REMOTE_PREFIXES = ("s3://", "r2://")  # accept legacy r2:// refs as remote too
 _EXT = {"raw": "json", "processed": "json", "screenshots": "png", "html": "html"}
 _CONTENT_TYPE = {
     "json": "application/json",
@@ -70,37 +72,45 @@ class LocalBackend:
         return None  # served via the API (FileResponse)
 
 
-class R2Backend:
+class SupabaseBackend:
+    """Supabase Storage via its S3-compatible endpoint (boto3)."""
+
     is_local = False
 
     def __init__(self):
         import boto3  # imported lazily so local installs don't need boto3
         from botocore.config import Config
 
-        endpoint = settings.r2_endpoint_url or (
-            f"https://{settings.r2_account_id}.r2.cloudflarestorage.com"
+        self.bucket = settings.supabase_storage_bucket
+        ref = settings.supabase_project_ref
+        # public object base, e.g. https://<ref>.storage.supabase.co/storage/v1/object/public/<bucket>
+        self.public_base = (
+            f"https://{ref}.storage.supabase.co/storage/v1/object/public/{self.bucket}"
+            if (settings.supabase_storage_public and ref)
+            else ""
         )
-        self.bucket = settings.r2_bucket
-        self.public_base = settings.r2_public_base_url.rstrip("/") if settings.r2_public_base_url else ""
         self.client = boto3.client(
             "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id=settings.r2_access_key_id,
-            aws_secret_access_key=settings.r2_secret_access_key,
-            region_name="auto",
+            endpoint_url=settings.supabase_s3_endpoint_url,
+            aws_access_key_id=settings.supabase_s3_access_key_id,
+            aws_secret_access_key=settings.supabase_s3_secret_access_key,
+            region_name=settings.supabase_s3_region,
             config=Config(signature_version="s3v4", retries={"max_attempts": 3}),
         )
-        # Legacy artifacts written before R2 was enabled have local-path refs;
+        # Legacy artifacts written to local disk have filesystem-path refs;
         # resolve those through the local backend instead of treating them as keys.
         self._local = LocalBackend(settings.storage_dir)
 
     @staticmethod
-    def _is_r2(ref: str) -> bool:
-        return ref.startswith(_R2_PREFIX)
+    def _is_remote(ref: str) -> bool:
+        return ref.startswith(_REMOTE_PREFIXES)
 
     @staticmethod
     def _key(ref: str) -> str:
-        return ref[len(_R2_PREFIX):] if ref.startswith(_R2_PREFIX) else ref
+        for p in _REMOTE_PREFIXES:
+            if ref.startswith(p):
+                return ref[len(p):]
+        return ref
 
     def put_json(self, category: str, uid: str, data: dict[str, Any]) -> str:
         key = f"{category}/{uid}.json"
@@ -110,7 +120,7 @@ class R2Backend:
             Body=json.dumps(data, ensure_ascii=False).encode("utf-8"),
             ContentType="application/json",
         )
-        return f"{_R2_PREFIX}{key}"
+        return f"{_S3_PREFIX}{key}"
 
     def put_artifact(self, category: str, uid: str, local_path: str) -> str:
         ext = _EXT.get(category, Path(local_path).suffix.lstrip(".") or "bin")
@@ -119,23 +129,23 @@ class R2Backend:
             str(local_path), self.bucket, key,
             ExtraArgs={"ContentType": _CONTENT_TYPE.get(ext, "application/octet-stream")},
         )
-        # local file was a temp staging copy — remove it now that it's in R2.
+        # local file was a temp staging copy — remove it now that it's uploaded.
         # Best-effort: a leftover temp file must not fail the (successful) upload.
         try:
             Path(local_path).unlink(missing_ok=True)
         except Exception:
-            logger.debug("could not remove local staging file %s after R2 upload",
+            logger.debug("could not remove local staging file %s after upload",
                          local_path, exc_info=True)
-        return f"{_R2_PREFIX}{key}"
+        return f"{_S3_PREFIX}{key}"
 
     def load_json(self, ref: str) -> dict[str, Any]:
-        if not self._is_r2(ref):  # legacy local-path ref
+        if not self._is_remote(ref):  # legacy local-path ref
             return self._local.load_json(ref)
         obj = self.client.get_object(Bucket=self.bucket, Key=self._key(ref))
         return json.loads(obj["Body"].read().decode("utf-8"))
 
     def read_bytes(self, ref: str) -> tuple[bytes, str] | None:
-        if not self._is_r2(ref):  # legacy local-path ref
+        if not self._is_remote(ref):  # legacy local-path ref
             return self._local.read_bytes(ref)
         from botocore.exceptions import ClientError
 
@@ -147,11 +157,11 @@ class R2Backend:
             if code in ("NoSuchKey", "NotFound", "404"):
                 return None  # genuinely missing → 404 at the API
             # permission/network/etc — don't masquerade as "not found"
-            logger.warning("R2 read failed for %s (bucket=%s): %s", ref, self.bucket, code)
+            logger.warning("storage read failed for %s (bucket=%s): %s", ref, self.bucket, code)
             raise
 
     def delete(self, ref: str) -> bool:
-        if not self._is_r2(ref):  # legacy local-path ref
+        if not self._is_remote(ref):  # legacy local-path ref
             return self._local.delete(ref)
         from botocore.exceptions import ClientError
 
@@ -160,11 +170,11 @@ class R2Backend:
             return True
         except ClientError as exc:
             code = str(exc.response.get("Error", {}).get("Code", ""))
-            logger.warning("r2 delete failed: %s (code=%s)", ref, code)
+            logger.warning("storage delete failed: %s (code=%s)", ref, code)
             return False
 
     def url(self, ref: str) -> str | None:
-        if not self._is_r2(ref):  # legacy local ref → served via the API
+        if not self._is_remote(ref):  # legacy local ref → served via the API
             return None
         key = self._key(ref)
         if self.public_base:
@@ -178,13 +188,13 @@ class R2Backend:
 
 
 def _build_backend():
-    if settings.r2_enabled:
+    if settings.storage_enabled:
         try:
-            b = R2Backend()
-            logger.info("storage backend: Cloudflare R2 (bucket=%s)", settings.r2_bucket)
+            b = SupabaseBackend()
+            logger.info("storage backend: Supabase Storage (bucket=%s)", settings.supabase_storage_bucket)
             return b
         except Exception:
-            logger.exception("R2 init failed; falling back to local storage")
+            logger.exception("Supabase Storage init failed; falling back to local storage")
     logger.info("storage backend: local disk (%s)", settings.storage_dir)
     return LocalBackend(settings.storage_dir)
 

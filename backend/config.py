@@ -54,19 +54,34 @@ class Settings(BaseSettings):
     celery_broker_url: str = ""
     celery_result_backend: str = ""
 
-    # Cloudflare R2 (S3-compatible) — when configured, artifacts go to the bucket
-    # instead of local disk. Leave blank to use local ./storage.
-    r2_account_id: str = ""
-    r2_access_key_id: str = ""
-    r2_secret_access_key: str = ""
-    r2_bucket: str = ""
-    r2_endpoint_url: str = ""          # defaults to https://<account>.r2.cloudflarestorage.com
-    r2_public_base_url: str = ""       # optional public/CDN base for serving artifacts
+    # Supabase Storage (S3-compatible) — when configured, artifacts go to the
+    # bucket instead of local disk. Leave blank to use local ./storage.
+    # S3 access keys are generated in Supabase: Storage → Settings → S3 access keys.
+    supabase_project_ref: str = ""        # e.g. aeudrluqrzvfiyumnjsf
+    supabase_s3_region: str = ""          # e.g. ap-northeast-1 (project region)
+    supabase_s3_access_key_id: str = ""
+    supabase_s3_secret_access_key: str = ""
+    supabase_storage_bucket: str = ""
+    supabase_s3_endpoint: str = ""        # override; else derived from project_ref
+    supabase_storage_public: bool = False  # public bucket → build public object URLs
 
     @property
-    def r2_enabled(self) -> bool:
-        return bool(self.r2_access_key_id and self.r2_secret_access_key and self.r2_bucket
-                    and (self.r2_account_id or self.r2_endpoint_url))
+    def supabase_s3_endpoint_url(self) -> str:
+        if self.supabase_s3_endpoint:
+            return self.supabase_s3_endpoint
+        if self.supabase_project_ref:
+            return f"https://{self.supabase_project_ref}.storage.supabase.co/storage/v1/s3"
+        return ""
+
+    @property
+    def storage_enabled(self) -> bool:
+        return bool(
+            self.supabase_s3_access_key_id
+            and self.supabase_s3_secret_access_key
+            and self.supabase_storage_bucket
+            and self.supabase_s3_region
+            and self.supabase_s3_endpoint_url
+        )
 
     @property
     def celery_enabled(self) -> bool:
