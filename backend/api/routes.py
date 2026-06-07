@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
 
@@ -14,15 +12,16 @@ from backend.api.schemas import (
     ProjectOut,
     SuggestPromptsBody,
 )
-from backend.capture import create_pending_runs, run_capture
+from backend.capture import create_pending_runs
 from backend.capture.competitors import detect_competitors_for_project
 from backend.config import settings
 from backend.database.session import session_scope
 from backend.llm import gemini, service as llm_service
 from backend.models import Competitor, Project, Prompt
-from backend.processing.pipeline import process_project
 from backend.providers import PROVIDER_REGISTRY
+from backend.storage import backends as storage
 from backend.storage import purge_run_files
+from backend.tasks import submit_capture, submit_reprocess
 
 router = APIRouter(prefix="/api")
 
@@ -124,9 +123,10 @@ def trigger_capture(
             proj.providers = ",".join(payload.providers)
 
     # Pre-create all (provider × prompt) runs as "pending" so the dashboard can
-    # render the full pipeline immediately, then run them in the background.
+    # render the full pipeline immediately, then dispatch to a worker (Celery) or
+    # an in-process background task when no broker is configured.
     batch_id, run_ids = create_pending_runs(project_id, prompts, payload.providers, geo)
-    bg.add_task(run_capture, run_ids, payload.force_refresh)
+    mode = submit_capture(run_ids, payload.force_refresh, bg)
     return {
         "ok": True,
         "batch_id": batch_id,
@@ -135,13 +135,14 @@ def trigger_capture(
         "prompts": len(prompts),
         "geo_location": geo,
         "force_refresh": payload.force_refresh,
+        "mode": mode,
     }
 
 
 @router.post("/projects/{project_id}/reprocess")
-def reprocess(project_id: int) -> dict:
-    count = process_project(project_id)
-    return {"ok": True, "reprocessed": count}
+def reprocess(project_id: int, bg: BackgroundTasks) -> dict:
+    mode, count = submit_reprocess(project_id, bg)
+    return {"ok": True, "mode": mode, "reprocessed": count}
 
 
 # ---------- LLM intelligence ----------
@@ -266,10 +267,18 @@ def get_screenshot(run_id: int):
         r = db.get(Run, run_id)
         if r is None or not r.screenshot_path:
             raise HTTPException(404, "no screenshot")
-        p = Path(r.screenshot_path)
-        if not p.exists():
-            raise HTTPException(404, "screenshot missing")
-        return FileResponse(p, media_type="image/png")
+        ref = r.screenshot_path
+
+    # R2: redirect to a (presigned/public) URL when available
+    url = storage.artifact_url(ref)
+    if url:
+        return RedirectResponse(url)
+    # otherwise stream the bytes (works for both local files and R2 fallback)
+    data = storage.read_bytes(ref)
+    if data is None:
+        raise HTTPException(404, "screenshot missing")
+    content, content_type = data
+    return Response(content=content, media_type=content_type)
 
 
 @router.get("/providers")

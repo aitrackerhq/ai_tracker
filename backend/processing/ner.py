@@ -120,6 +120,11 @@ class EntityExtractor:
         # collapse internal whitespace/newlines, strip bullets + punctuation
         s = _WS_RE.sub(" ", (s or "").replace("\n", " ")).strip()
         s = s.strip(_STRIP_CHARS).strip()
+        # comma-joined lists ("Windows, Mac, Linux") → keep the first real name
+        if "," in s:
+            s = s.split(",", 1)[0].strip()
+        # drop possessive ("Notion's" -> "Notion")
+        s = re.sub(r"['’]s$", "", s).strip()
         if len(s) < 2 or len(s) > 60:
             return None
         if len(s.split()) > 5:  # brands are short; long phrases are headings/noise

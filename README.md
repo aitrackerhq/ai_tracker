@@ -1,28 +1,83 @@
-# AI Search Visibility Tracker — Phase 1 MVP
+# AI Search Visibility Tracker
 
-Track how a brand appears inside **real** AI interfaces — ChatGPT, Gemini, and
-Google AI Overviews — using Playwright to capture what users actually see.
+Track how a brand appears inside **real** AI interfaces — ChatGPT, Gemini,
+Perplexity, Google AI Overviews, and Google AI Mode — measuring visibility,
+sentiment/framing, citations, and competitors.
 
-> This is a lightweight local MVP. No Redis, Celery, Postgres, or microservices.
-> Just SQLite + local JSON + an async pipeline.
+> Runs locally with **zero external services** (SQLite + local disk + in-process
+> tasks), and scales up to **Postgres + Celery/Redis + Cloudflare R2** purely by
+> setting env vars. Each piece is pluggable with a graceful fallback.
 
 ## Architecture
 
-```
-   Playwright Capture     →  Raw JSON Storage  →  NER Processing  →  Ranking  →  Analytics API  →  React Dashboard
-   (chatgpt, gemini,         /storage/raw/        spaCy + rapidfuzz   SQLite       FastAPI            Vite + Tailwind
-    google_ai)               /storage/processed/                                                      Recharts
+```text
+                      ┌─────────────── Celery worker(s) ───────────────┐
+   FastAPI API  ──►   │  Playwright/SerpAPI capture → storage → NER →   │  ──►  Postgres
+   (enqueue job)      │  ranking → local sentiment → LLM competitors   │       (or SQLite)
+        ▲             └────────────────────────────────────────────────┘            │
+        │                              artifacts ▼                                   │
+   React dashboard  ◄────── Analytics API ◄──── Cloudflare R2 (or local ./storage) ◄┘
 ```
 
-Each layer is decoupled:
+When no broker is configured the capture runs as an in-process background task
+instead of on a worker — same code path, no Redis needed for local dev.
 
-- `backend/providers/*` — Playwright adapters (one per provider).
-- `backend/capture/` — orchestrator: runs providers, writes raw JSON, kicks off processing.
-- `backend/storage/` — append-only JSON store (raw is **immutable**).
-- `backend/processing/` — spaCy NER + rapidfuzz normalization.
+Layers (all decoupled):
+
+- `backend/providers/*` — capture adapters: Playwright (chatgpt/gemini/perplexity) + SerpAPI (google_ai/google_ai_mode).
+- `backend/capture/` — orchestrator (rate limit, backoff, circuit breaker, cache) + LLM competitor detection.
+- `backend/tasks/` — Celery app + dispatcher (falls back to FastAPI BackgroundTasks).
+- `backend/storage/` — pluggable artifact backend: local disk **or** Cloudflare R2 (S3).
+- `backend/processing/` — spaCy NER + rapidfuzz normalization + local HF sentiment.
 - `backend/ranking/` — visibility / position / citation scoring.
-- `backend/analytics/` — read-only views for the dashboard.
-- `backend/api/` — FastAPI routes.
+- `backend/llm/` — Gemini client (key rotation) for prompt suggestions + competitor detection.
+- `backend/analytics/` + `backend/api/` — read views + FastAPI routes.
+
+## Scaling up (all optional, env-driven)
+
+| Capability        | Env to set                                              | Fallback when unset            |
+| ----------------- | ------------------------------------------------------- | ------------------------------ |
+| **Postgres**      | `DATABASE_URL=postgresql+psycopg://…`                   | SQLite (`sqlite:///…`)         |
+| **Celery/Redis**  | `CELERY_BROKER_URL=redis://…`                           | in-process BackgroundTasks     |
+| **Cloudflare R2** | `R2_ACCOUNT_ID/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY/R2_BUCKET` | local `./storage`     |
+| **Key rotation**  | `SERP_API_KEYS=a,b,c` · `GEMINI_API_KEYS=a,b,c`         | single `SERP_API_KEY`/`GEMINI_API_KEY` |
+
+Start a worker (when using Celery):
+
+```bash
+celery -A backend.tasks.celery_app worker --loglevel=info
+```
+
+**Notes on the managed services:**
+- *Postgres (Supabase pooler)*: use the pooled endpoint (`…pooler.supabase.com:6543`).
+  The engine disables psycopg3 prepared statements (required for pgbouncer
+  transaction mode) and enables `pool_pre_ping`. Schema is created automatically;
+  a dialect-aware in-place column migration runs at startup (use Alembic for
+  anything heavier).
+- *R2*: artifacts are written under `raw/ processed/ screenshots/ html/` keys and
+  served via presigned URLs (or `R2_PUBLIC_BASE_URL` if you front it with a CDN).
+- *Key rotation*: round-robins keys and advances to the next on quota/`429`/`401`.
+
+### Run with the task queue live (local)
+
+```bash
+# 1. Redis broker (macOS) — persists across reboots
+brew install redis
+brew services start redis        # redis-cli ping → PONG
+
+# 2. point the app at it (.env)
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+
+# 3. run the API and a worker in separate terminals
+uvicorn backend.main:app --reload
+./scripts/worker.sh              # celery -A backend.tasks.celery_app worker --pool=solo
+```
+
+With the broker set, `POST /capture` returns immediately (`"mode": "celery"`) and
+the worker performs the scrape + NLP. Unset `CELERY_BROKER_URL` to revert to the
+in-process fallback. The worker uses the `solo` pool to avoid macOS fork-safety
+crashes from torch/Playwright.
 
 ## Folder layout
 

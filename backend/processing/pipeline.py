@@ -11,7 +11,7 @@ from backend.config import settings
 from backend.processing.ner import EntityExtractor
 from backend.processing.normalizer import EntityNormalizer
 from backend.processing.sentiment import analyze_framing
-from backend.storage import processed_store, raw_store
+from backend.storage import backends as storage
 from backend.utils.helpers import brand_root_from_domain, domain_from_url
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ def process_run(run_pk: int) -> dict[str, Any] | None:
             return None
 
         try:
-            raw = raw_store.read(_run_uid_from_path(run.raw_json_path))
+            raw = storage.load_json(run.raw_json_path)
         except Exception:
             logger.exception("failed to read raw json for run %s", run_pk)
             return None
@@ -126,8 +126,10 @@ def process_run(run_pk: int) -> dict[str, Any] | None:
             "citations": raw.get("citations") or [],
             "has_ai_overview": raw.get("has_ai_overview"),
         }
-        processed_path = processed_store.write(_run_uid_from_path(run.raw_json_path), processed_payload)
-        run.processed_json_path = str(processed_path)
+        processed_ref = storage.put_json(
+            "processed", _run_uid_from_path(run.raw_json_path), processed_payload
+        )
+        run.processed_json_path = processed_ref
 
         # Local sentiment/framing of the target brand (HF model, no API).
         if settings.enable_sentiment:

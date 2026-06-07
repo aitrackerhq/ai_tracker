@@ -6,57 +6,46 @@ from typing import Any
 
 import httpx
 
-from backend.config import settings
 from backend.providers.base import BaseProvider, CaptureResult, ProviderError
-from backend.providers.serpapi_common import extract_references, flatten_text_blocks
+from backend.providers.serpapi_common import (
+    SerpAPIError,
+    extract_references,
+    flatten_text_blocks,
+    is_configured,
+    serpapi_get,
+)
 from backend.utils.helpers import utc_now_iso
 
 logger = logging.getLogger(__name__)
-
-SERPAPI_ENDPOINT = "https://serpapi.com/search"
 
 
 class GoogleAIModeProvider(BaseProvider):
     """Google AI Mode via SerpAPI (engine=google_ai_mode) — no browser needed.
 
     Single request; the response carries top-level `text_blocks` +
-    `references` (same shape as AI Overview). Set SERP_API_KEY in .env.
+    `references` (same shape as AI Overview). Set SERP_API_KEY(S) in .env.
     """
 
     needs_browser = False
     name = "google_ai_mode"
 
     async def initialize(self) -> None:
-        if not settings.serp_api_key:
+        if not is_configured():
             raise ProviderError(
-                "SERP_API_KEY is not set. Add it to .env (https://serpapi.com/manage-api-key)."
+                "No SERP API key configured. Set SERP_API_KEY or SERP_API_KEYS in .env."
             )
 
     async def capture(self, prompt: str, run_id: str) -> CaptureResult:
         started = asyncio.get_event_loop().time()
-        params: dict[str, Any] = {
-            "engine": "google_ai_mode",
-            "q": prompt,
-            "api_key": settings.serp_api_key,
-        }
+        params: dict[str, Any] = {"engine": "google_ai_mode", "q": prompt}
         if self.geo_location:
             params["location"] = self.geo_location
 
         async with httpx.AsyncClient(timeout=90.0) as client:
             try:
-                resp = await client.get(SERPAPI_ENDPOINT, params=params)
-            except httpx.HTTPError as exc:
-                raise ProviderError(f"SerpAPI request failed: {exc}") from exc
-            if resp.status_code == 401:
-                raise ProviderError("SerpAPI rejected the API key (401). Check SERP_API_KEY.")
-            try:
-                data = resp.json()
-            except Exception as exc:
-                raise ProviderError(
-                    f"SerpAPI returned non-JSON (status {resp.status_code})"
-                ) from exc
-            if isinstance(data, dict) and data.get("error"):
-                raise ProviderError(f"SerpAPI error: {data['error']}")
+                data = await serpapi_get(client, params)
+            except SerpAPIError as exc:
+                raise ProviderError(str(exc)) from exc
 
         elapsed = round(asyncio.get_event_loop().time() - started, 2)
         text = flatten_text_blocks(data.get("text_blocks") or [])

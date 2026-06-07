@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select
@@ -9,7 +8,7 @@ from sqlalchemy import select
 from backend.database.session import session_scope
 from backend.models import Citation, Mention, Project, Run
 from backend.ranking import compute_project_rankings
-from backend.storage import raw_store
+from backend.storage import backends as storage
 from backend.utils.helpers import brand_root_from_domain
 
 
@@ -276,7 +275,7 @@ class AnalyticsService:
             excerpt = ""
             if raw_path:
                 try:
-                    raw = raw_store.read(Path(raw_path).stem)
+                    raw = storage.load_json(raw_path)
                     excerpt = (raw.get("response_text") or "")[:800]
                 except Exception:
                     excerpt = ""

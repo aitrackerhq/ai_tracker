@@ -13,7 +13,7 @@ from sqlalchemy import select
 from backend.database.session import session_scope
 from backend.llm import gemini, service as llm_service
 from backend.models import Competitor, Project, Run
-from backend.storage import raw_store
+from backend.storage import backends as storage
 
 logger = logging.getLogger(__name__)
 
@@ -37,18 +37,17 @@ async def detect_competitors_for_project(project_id: int, max_runs: int = 30) ->
             .order_by(Run.created_at.desc())
             .limit(max_runs)
         ).all()
-        raw_stems = [r.raw_json_path for r in runs]
+        raw_refs = [r.raw_json_path for r in runs]
 
     response_texts: list[str] = []
-    for path in raw_stems:
+    for ref in raw_refs:
         try:
-            from pathlib import Path
-
-            raw = raw_store.read(Path(path).stem)
+            raw = storage.load_json(ref)
             txt = raw.get("response_text") or ""
             if txt:
                 response_texts.append(txt)
         except Exception:
+            logger.debug("failed to load raw response for ref %s", ref, exc_info=True)
             continue
 
     if not response_texts:
