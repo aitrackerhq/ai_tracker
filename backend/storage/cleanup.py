@@ -38,12 +38,20 @@ def purge_expired(ttl_days: int | None = None) -> dict[str, int]:
             select(Run).where(Run.created_at < cutoff, Run.status != "purged")
         ).all()
         for run in stale:
+            cleared = True
             for attr in _ARTIFACT_ATTRS:
-                if delete_ref(getattr(run, attr, None)):
+                ref = getattr(run, attr, None)
+                if not ref:
+                    continue
+                if delete_ref(ref):
                     deleted_files += 1
-                setattr(run, attr, None)
-            run.status = "purged"
-            purged_runs += 1
+                    setattr(run, attr, None)  # only null the ref once the file is gone
+                else:
+                    cleared = False
+            # only mark purged if every artifact was removed, so failures retry later
+            if cleared:
+                run.status = "purged"
+                purged_runs += 1
 
     logger.info("artifact purge: %d runs, %d files removed (ttl=%dd)", purged_runs, deleted_files, ttl_days)
     return {"runs_purged": purged_runs, "files_deleted": deleted_files, "ttl_days": ttl_days}

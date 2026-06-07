@@ -10,7 +10,7 @@ sentiment/framing, citations, and competitors.
 
 ## Architecture
 
-```
+```text
                       ┌─────────────── Celery worker(s) ───────────────┐
    FastAPI API  ──►   │  Playwright/SerpAPI capture → storage → NER →   │  ──►  Postgres
    (enqueue job)      │  ranking → local sentiment → LLM competitors   │       (or SQLite)

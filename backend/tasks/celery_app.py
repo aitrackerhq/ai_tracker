@@ -10,10 +10,23 @@ Run a worker with:
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlsplit, urlunsplit
 
 from backend.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _redact(url: str | None) -> str:
+    """Strip any user:pass credentials from a broker URL before logging."""
+    if not url:
+        return ""
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    if parts.port:
+        host = f"{host}:{parts.port}"
+    return urlunsplit((parts.scheme, host, parts.path, "", ""))
+
 
 celery_app = None
 
@@ -37,7 +50,7 @@ if settings.celery_enabled:
             broker_connection_retry_on_startup=True,
             result_expires=3600,
         )
-        logger.info("Celery enabled (broker=%s)", settings.celery_broker_url)
+        logger.info("Celery enabled (broker=%s)", _redact(settings.celery_broker_url))
     except Exception:
         logger.exception("Celery init failed; falling back to in-process tasks")
         celery_app = None

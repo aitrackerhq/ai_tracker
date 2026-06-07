@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from backend.api.routes import router
 from backend.config import settings
@@ -45,12 +46,21 @@ def _ensure_columns() -> None:
             if dialect == "sqlite":
                 rows = conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
                 return {r[1] for r in rows} or None
-            rows = conn.exec_driver_sql(
-                f"SELECT column_name FROM information_schema.columns WHERE table_name='{table}'"
+            # Scope to the active schema (parameterized — avoids cross-schema
+            # homonym matches and SQL injection).
+            rows = conn.execute(
+                text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = current_schema() AND table_name = :t"
+                ),
+                {"t": table},
             ).fetchall()
             return {r[0] for r in rows} or None
         except Exception:
-            return None
+            # A missing table returns an empty set (handled above), so any
+            # exception here is a real failure — surface it, don't skip migrations.
+            logger.exception("column introspection failed for %s (%s)", table, dialect)
+            raise
 
     with engine.begin() as conn:
         for table, cols in pending.items():

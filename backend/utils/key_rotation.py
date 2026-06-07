@@ -40,7 +40,8 @@ class KeyRotator:
         return list(self._keys)
 
     def current(self) -> str:
-        return self._keys[self._i] if self._keys else ""
+        with self._lock:
+            return self._keys[self._i] if self._keys else ""
 
     def advance(self) -> str:
         """Move to the next key and return it."""
@@ -51,8 +52,13 @@ class KeyRotator:
             return self._keys[self._i]
 
     def ordered_from_current(self) -> list[str]:
-        """Keys starting at the current index — for trying each once per request."""
-        if not self._keys:
+        """Keys starting at the current index — for trying each once per request.
+        Takes a consistent snapshot under the lock so concurrent advance() calls
+        can't make a single pass skip or repeat keys."""
+        with self._lock:
+            keys = list(self._keys)
+            start = self._i
+        if not keys:
             return []
-        n = len(self._keys)
-        return [self._keys[(self._i + offset) % n] for offset in range(n)]
+        n = len(keys)
+        return [keys[(start + offset) % n] for offset in range(n)]

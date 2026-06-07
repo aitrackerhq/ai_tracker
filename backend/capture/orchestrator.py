@@ -314,9 +314,12 @@ class CaptureOrchestrator:
             run = db.get(Run, run_pk)
             if run is not None:
                 run.raw_json_path = new_ref
-                # reference the existing heavy artifacts (don't duplicate files)
-                run.screenshot_path = cached.get("screenshot_path")
-                run.html_path = cached.get("html_path")
+                # Don't share the source run's screenshot/HTML refs: TTL purge
+                # deletes artifacts per stale run, which would break a younger
+                # cached run pointing at the same file. The copied raw JSON is
+                # enough for analytics/reprocessing; the screenshot is a duplicate.
+                run.screenshot_path = None
+                run.html_path = None
                 run.cached = True
                 run.status = "captured"
         process_run(run_pk)  # NER + ranking + local sentiment (processing layer)

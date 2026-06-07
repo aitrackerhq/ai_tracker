@@ -47,6 +47,7 @@ async def detect_competitors_for_project(project_id: int, max_runs: int = 30) ->
             if txt:
                 response_texts.append(txt)
         except Exception:
+            logger.debug("failed to load raw response for ref %s", ref, exc_info=True)
             continue
 
     if not response_texts:

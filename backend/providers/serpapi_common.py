@@ -22,6 +22,9 @@ serp_keys = KeyRotator(parse_keys(settings.serp_api_keys, settings.serp_api_key)
 _QUOTA_HINTS = ("run out of searches", "ran out of searches", "exceeded", "plan limit",
                 "out of searches", "account has no searches")
 
+# HTTP statuses that warrant rotating to the next key (auth/quota/rate-limit)
+_ROTATE_STATUSES = {401, 403, 429}
+
 
 class SerpAPIError(Exception):
     pass
@@ -43,14 +46,17 @@ async def serpapi_get(client: httpx.AsyncClient, params: dict[str, Any]) -> dict
         except httpx.HTTPError as exc:
             last_err = f"request failed: {exc}"
             continue
-        if resp.status_code == 401:
-            last_err = "401 (invalid key)"
+        if resp.status_code in _ROTATE_STATUSES:
+            last_err = f"HTTP {resp.status_code} (auth/quota)"
+            logger.warning("SerpAPI key failed (HTTP %d), rotating", resp.status_code)
             serp_keys.advance()
             continue
         try:
             data = resp.json()
-        except Exception:
-            raise SerpAPIError(f"SerpAPI returned non-JSON (status {resp.status_code})")
+        except Exception as exc:
+            raise SerpAPIError(
+                f"SerpAPI returned non-JSON (status {resp.status_code})"
+            ) from exc
         err = (data.get("error") or "") if isinstance(data, dict) else ""
         if err and any(h in err.lower() for h in _QUOTA_HINTS):
             last_err = err

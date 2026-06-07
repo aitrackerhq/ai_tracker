@@ -90,6 +90,13 @@ class R2Backend:
             region_name="auto",
             config=Config(signature_version="s3v4", retries={"max_attempts": 3}),
         )
+        # Legacy artifacts written before R2 was enabled have local-path refs;
+        # resolve those through the local backend instead of treating them as keys.
+        self._local = LocalBackend(settings.storage_dir)
+
+    @staticmethod
+    def _is_r2(ref: str) -> bool:
+        return ref.startswith(_R2_PREFIX)
 
     @staticmethod
     def _key(ref: str) -> str:
@@ -122,17 +129,30 @@ class R2Backend:
         return f"{_R2_PREFIX}{key}"
 
     def load_json(self, ref: str) -> dict[str, Any]:
+        if not self._is_r2(ref):  # legacy local-path ref
+            return self._local.load_json(ref)
         obj = self.client.get_object(Bucket=self.bucket, Key=self._key(ref))
         return json.loads(obj["Body"].read().decode("utf-8"))
 
     def read_bytes(self, ref: str) -> tuple[bytes, str] | None:
+        if not self._is_r2(ref):  # legacy local-path ref
+            return self._local.read_bytes(ref)
+        from botocore.exceptions import ClientError
+
         try:
             obj = self.client.get_object(Bucket=self.bucket, Key=self._key(ref))
             return obj["Body"].read(), obj.get("ContentType", "application/octet-stream")
-        except Exception:
-            return None
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in ("NoSuchKey", "NotFound", "404"):
+                return None  # genuinely missing → 404 at the API
+            # permission/network/etc — don't masquerade as "not found"
+            logger.warning("R2 read failed for %s (bucket=%s): %s", ref, self.bucket, code)
+            raise
 
     def delete(self, ref: str) -> bool:
+        if not self._is_r2(ref):  # legacy local-path ref
+            return self._local.delete(ref)
         try:
             self.client.delete_object(Bucket=self.bucket, Key=self._key(ref))
             return True
@@ -141,6 +161,8 @@ class R2Backend:
             return False
 
     def url(self, ref: str) -> str | None:
+        if not self._is_r2(ref):  # legacy local ref → served via the API
+            return None
         key = self._key(ref)
         if self.public_base:
             return f"{self.public_base}/{key}"

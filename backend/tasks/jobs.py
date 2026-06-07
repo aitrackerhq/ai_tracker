@@ -54,5 +54,8 @@ def submit_reprocess(project_id: int, background_tasks=None) -> tuple[str, int |
     if reprocess_task is not None:
         reprocess_task.delay(project_id)
         return "celery", None
+    if background_tasks is not None:
+        background_tasks.add_task(process_project, project_id)
+        return "background", None
     count = process_project(project_id)
     return "inline", count
