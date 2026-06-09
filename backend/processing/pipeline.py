@@ -203,7 +203,9 @@ def process_batch(run_ids: list[int]) -> list[int]:
         if status != "captured":
             continue
         try:
-            process_run(run_pk)
+            if process_run(run_pk) is None:  # non-exception failure (missing raw/project)
+                logger.warning("processing skipped for run %s", run_pk)
+                continue
             processed.append(run_pk)
             # only detect competitors for projects that actually processed a run
             project_ids.add(project_id)

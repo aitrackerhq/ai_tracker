@@ -96,17 +96,20 @@ async def _steel_browser_context(provider_name: str) -> AsyncIterator[BrowserCon
     if settings.steel_persist_profile and session.profile_id and session.profile_id != stored_profile:
         _set_steel_profile(provider_name, session.profile_id)
     cdp_url = f"wss://connect.steel.dev?apiKey={settings.steel_api_key}&sessionId={session.id}"
-    async with async_playwright() as pw:
-        browser = await pw.chromium.connect_over_cdp(cdp_url)
-        try:
-            ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
-            yield ctx
-        finally:
-            await browser.close()
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.connect_over_cdp(cdp_url)
             try:
-                await asyncio.to_thread(client.sessions.release, session.id)
-            except Exception:
-                logger.warning("steel session release failed: %s", session.id)
+                ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+                yield ctx
+            finally:
+                await browser.close()
+    finally:
+        # release in an outer finally so a failed connect_over_cdp doesn't leak the session
+        try:
+            await asyncio.to_thread(client.sessions.release, session.id)
+        except Exception:
+            logger.warning("steel session release failed: %s", session.id)
 
 
 @asynccontextmanager
@@ -503,5 +506,11 @@ def capture_provider(
     `run_ids` are the pre-created rows for `provider_name`. No processing —
     that runs later in the chord callback. Returns attempted run_ids."""
     orch = CaptureOrchestrator(run_ids, force_refresh=force_refresh)
-    pjobs = [(pk, pid, prompt, geo) for pk, pid, _prov, prompt, geo in orch._load_jobs()]
+    jobs = orch._load_jobs()
+    mismatched = [pk for pk, _pid, prov, _p, _g in jobs if prov != provider_name]
+    if mismatched:
+        raise ValueError(
+            f"capture_provider({provider_name!r}) got run_ids for other providers: {mismatched}"
+        )
+    pjobs = [(pk, pid, prompt, geo) for pk, pid, _prov, prompt, geo in jobs]
     return asyncio.run(orch._capture_provider(provider_name, pjobs))

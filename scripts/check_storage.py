@@ -34,8 +34,6 @@ def main() -> int:
         print("  missing: " + ", ".join(missing))
         return 0
 
-    from backend.storage.backends import SupabaseBackend
-
     bucket = settings.supabase_storage_bucket
     print(f"endpoint : {settings.supabase_s3_endpoint_url}")
     print(f"bucket   : {bucket}")
@@ -43,6 +41,8 @@ def main() -> int:
     print("-" * 48)
 
     try:
+        # imported here so the module-level fail-fast backend init is caught below
+        from backend.storage.backends import SupabaseBackend
         be = SupabaseBackend()
     except Exception as exc:  # noqa: BLE001 — surface init failure verbatim
         print(f"FAIL  init backend: {exc}")
