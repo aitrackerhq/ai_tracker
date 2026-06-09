@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from sqlalchemy import select
@@ -63,7 +65,13 @@ def process_run(run_pk: int) -> dict[str, Any] | None:
         extractor = EntityExtractor()
 
         response_text: str = raw.get("response_text") or ""
-        raw_entities = extractor.extract(response_text)
+        target_key = _norm_key(brand_root_from_domain(project.domain) or project.name)
+        target_brand = normalizer.canonical_for(target_key)
+
+        # NER (spaCy) and sentiment (HF/torch) both read response_text independently
+        # and both release the GIL during their native work, so running them on two
+        # threads gives real overlap. Processing stays sequential ACROSS runs.
+        raw_entities, framing = _extract_and_analyze(extractor, target_brand, response_text)
 
         # clear any prior processing
         for m in list(run.mentions):
@@ -72,7 +80,6 @@ def process_run(run_pk: int) -> dict[str, Any] | None:
             db.delete(c)
         db.flush()
 
-        target_key = _norm_key(brand_root_from_domain(project.domain) or project.name)
         position = 0
         for ent in raw_entities:
             ckey = normalizer.resolve(ent.text)
@@ -131,16 +138,12 @@ def process_run(run_pk: int) -> dict[str, Any] | None:
         )
         run.processed_json_path = processed_ref
 
-        # Local sentiment/framing of the target brand (HF model, no API).
-        if settings.enable_sentiment:
-            target_brand = normalizer.canonical_for(target_key)
-            try:
-                framing = analyze_framing(target_brand, response_text)
-                run.target_sentiment = framing.get("sentiment")
-                run.target_framing = framing.get("framing")
-                run.framing_rationale = framing.get("rationale")
-            except Exception:
-                logger.exception("sentiment analysis failed for run %s", run_pk)
+        # Local sentiment/framing of the target brand (computed above, in parallel
+        # with NER). `framing` is None when sentiment is disabled or errored.
+        if framing is not None:
+            run.target_sentiment = framing.get("sentiment")
+            run.target_framing = framing.get("framing")
+            run.framing_rationale = framing.get("rationale")
 
         run.status = "processed"
 
@@ -149,6 +152,72 @@ def process_run(run_pk: int) -> dict[str, Any] | None:
         # See backend.capture.competitors.detect_competitors_for_project.
 
         return processed_payload
+
+
+def _extract_and_analyze(
+    extractor: EntityExtractor, target_brand: str, response_text: str
+):
+    """Run NER and sentiment concurrently. Returns (raw_entities, framing|None)."""
+    if not settings.enable_sentiment:
+        return extractor.extract(response_text), None
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        ner_future = ex.submit(extractor.extract, response_text)
+        sentiment_future = ex.submit(_safe_framing, target_brand, response_text)
+        return ner_future.result(), sentiment_future.result()
+
+
+def _safe_framing(brand: str, text: str) -> dict | None:
+    try:
+        return analyze_framing(brand, text)
+    except Exception:
+        logger.exception("sentiment analysis failed")
+        return None
+
+
+def process_batch(run_ids: list[int]) -> list[int]:
+    """Process captured runs **sequentially** (NER ∥ sentiment within each run),
+    then run project-level competitor detection once.
+
+    This is the processing phase that runs after the (parallel) capture phase —
+    in the in-process path and as the Celery chord callback. Runs not in the
+    'captured' state (errored / already-processed) are skipped. Returns the
+    run_ids that were processed.
+    """
+    with session_scope() as db:
+        rows = db.scalars(select(Run).where(Run.id.in_(run_ids))).all()
+        plan = [(r.id, r.project_id, r.status) for r in rows]
+
+    processed: list[int] = []
+    project_ids: set[int] = set()
+    for run_pk, project_id, status in plan:
+        project_ids.add(project_id)
+        if status != "captured":
+            continue
+        try:
+            process_run(run_pk)
+            processed.append(run_pk)
+        except Exception:
+            logger.exception("processing failed for run %s", run_pk)
+
+    _detect_competitors(project_ids)
+    return processed
+
+
+def _detect_competitors(project_ids: set[int]) -> None:
+    """Project-level LLM competitor detection (best-effort). Imported lazily to
+    avoid a circular import with the capture layer."""
+    if not project_ids:
+        return
+    from backend.capture.competitors import detect_competitors_for_project
+
+    async def _runner() -> None:
+        for pid in project_ids:
+            try:
+                await detect_competitors_for_project(pid)
+            except Exception:
+                logger.exception("competitor detection failed for project %s", pid)
+
+    asyncio.run(_runner())
 
 
 def process_project(project_id: int) -> int:

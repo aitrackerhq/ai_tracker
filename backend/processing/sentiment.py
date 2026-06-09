@@ -49,7 +49,14 @@ def _get_pipe():
         return _pipe
     _pipe_loaded = True
     try:
+        import os
+
         from transformers import pipeline  # type: ignore[import-not-found]
+
+        # Make a configured HF token available to transformers/huggingface_hub.
+        # setdefault → a shell-exported HF_TOKEN still wins over the .env value.
+        if settings.hf_token:
+            os.environ.setdefault("HF_TOKEN", settings.hf_token)
 
         _pipe = pipeline("sentiment-analysis", model=settings.sentiment_model, truncation=True)
         logger.info("loaded HF sentiment model: %s", settings.sentiment_model)

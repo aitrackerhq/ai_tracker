@@ -8,6 +8,8 @@ sentiment/framing, citations, and competitors.
 > tasks), and scales up to **Postgres + Celery/Redis + Supabase Storage** purely
 > by setting env vars. Each piece is pluggable with a graceful fallback.
 
+---
+
 ## Architecture
 
 ```text
@@ -26,65 +28,16 @@ Layers (all decoupled):
 
 - `backend/providers/*` — capture adapters: Playwright (chatgpt/gemini/perplexity) + SerpAPI (google_ai/google_ai_mode).
 - `backend/capture/` — orchestrator (rate limit, backoff, circuit breaker, cache) + LLM competitor detection.
-- `backend/tasks/` — Celery app + dispatcher (falls back to FastAPI BackgroundTasks).
+- `backend/tasks/` — Celery app + dispatcher: fans capture out one task per provider (parallel across workers) → chord callback runs NLP sequentially. Falls back to FastAPI BackgroundTasks with the same capture-parallel / process-sequential split.
 - `backend/storage/` — pluggable artifact backend: local disk **or** Supabase Storage (S3).
 - `backend/processing/` — spaCy NER + rapidfuzz normalization + local HF sentiment.
 - `backend/ranking/` — visibility / position / citation scoring.
 - `backend/llm/` — Gemini client (key rotation) for prompt suggestions + competitor detection.
 - `backend/analytics/` + `backend/api/` — read views + FastAPI routes.
 
-## Scaling up (all optional, env-driven)
+---
 
-| Capability        | Env to set                                              | Fallback when unset            |
-| ----------------- | ------------------------------------------------------- | ------------------------------ |
-| **Postgres**      | `DATABASE_URL=postgresql+psycopg://…`                   | SQLite (`sqlite:///…`)         |
-| **Celery/Redis**  | `CELERY_BROKER_URL=redis://…`                           | in-process BackgroundTasks     |
-| **Supabase Storage** | `SUPABASE_PROJECT_REF/SUPABASE_S3_REGION/SUPABASE_S3_ACCESS_KEY_ID/SUPABASE_S3_SECRET_ACCESS_KEY/SUPABASE_STORAGE_BUCKET` | local `./storage` |
-| **Key rotation**  | `SERP_API_KEYS=a,b,c` · `GEMINI_API_KEYS=a,b,c`         | single `SERP_API_KEY`/`GEMINI_API_KEY` |
-
-Start a worker (when using Celery):
-
-```bash
-celery -A backend.tasks.celery_app worker --loglevel=info
-```
-
-**Notes on the managed services:**
-- *Postgres (Supabase pooler)*: use the pooled endpoint (`…pooler.supabase.com:6543`).
-  The engine disables psycopg3 prepared statements (required for pgbouncer
-  transaction mode) and enables `pool_pre_ping`. Schema is created automatically;
-  a dialect-aware in-place column migration runs at startup (use Alembic for
-  anything heavier).
-- *Supabase Storage*: create a bucket and generate S3 access keys
-  (Storage → Settings → S3 access keys). Endpoint is derived from
-  `SUPABASE_PROJECT_REF` (`https://<ref>.storage.supabase.co/storage/v1/s3`) or
-  set `SUPABASE_S3_ENDPOINT` directly; `SUPABASE_S3_REGION` is the project region
-  (e.g. `ap-northeast-1`). Artifacts are written under `raw/ processed/
-  screenshots/ html/` keys and served via presigned URLs, or public object URLs
-  if the bucket is public and `SUPABASE_STORAGE_PUBLIC=true`.
-- *Key rotation*: round-robins keys and advances to the next on quota/`429`/`401`.
-
-### Run with the task queue live (local)
-
-```bash
-# 1. Redis broker (macOS) — persists across reboots
-brew install redis
-brew services start redis        # redis-cli ping → PONG
-
-# 2. point the app at it (.env)
-CELERY_BROKER_URL=redis://localhost:6379/0
-CELERY_RESULT_BACKEND=redis://localhost:6379/1
-
-# 3. run the API and a worker in separate terminals
-uvicorn backend.main:app --reload
-./scripts/worker.sh              # celery -A backend.tasks.celery_app worker --pool=solo
-```
-
-With the broker set, `POST /capture` returns immediately (`"mode": "celery"`) and
-the worker performs the scrape + NLP. Unset `CELERY_BROKER_URL` to revert to the
-in-process fallback. The worker uses the `solo` pool to avoid macOS fork-safety
-crashes from torch/Playwright.
-
-## Folder layout
+## Folder Layout
 
 ```
 ai_tracker/
@@ -113,11 +66,23 @@ ai_tracker/
 └── README.md
 ```
 
-## Setup
+---
 
-### 1. Backend
+## Project Setup
+
+This walks through the **scaled stack** as the default path — Postgres + Celery/Redis +
+Supabase Storage — wired purely through `.env`. If you'd rather run with zero external
+services, see the **Local fallback** subpoint at the end of the backend section; the same
+code paths degrade gracefully to SQLite + local disk + in-process tasks.
+
+### How to Run the Project
+
+#### Backend
+
+##### 1. Install dependencies
 
 ```bash
+# Create and activate virtual environment
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -128,15 +93,53 @@ pip install -r requirements.txt
 patchright install chrome
 python -m playwright install chromium   # fallback only
 
+# Download language model
 python -m spacy download en_core_web_sm
 
+# Configure environment
 cp .env.example .env
+```
 
-# create SQLite tables
+##### 2. Configure the scaled infrastructure (`.env`)
+
+Set these in `.env` to run against managed Postgres, a Celery/Redis task queue, and
+Supabase Storage:
+
+| Capability            | Env var(s)                                                                                                                          | Notes                                                                                   |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Postgres**          | `DATABASE_URL=postgresql+psycopg://…`                                                                                             | Use the Supabase pooled endpoint (`…pooler.supabase.com:6543`). Schema auto-migrates at boot. |
+| **Celery / Redis**    | `CELERY_BROKER_URL`, `CELERY_RESULT_BACKEND`                                                                                       | Offloads browser scrapes + NLP to worker processes (survive API restarts).              |
+| **Supabase Storage**  | `SUPABASE_PROJECT_REF`, `SUPABASE_S3_REGION`, `SUPABASE_S3_ACCESS_KEY_ID`, `SUPABASE_S3_SECRET_ACCESS_KEY`, `SUPABASE_STORAGE_BUCKET` | Raw JSON, screenshots, and HTML stream to the bucket instead of `./storage`.            |
+| **Key rotation**      | `SERP_API_KEYS=a,b,c` · `GEMINI_API_KEYS=a,b,c`                                                                                    | Round-robins keys; advances to the next on quota/`429`/`401`.                           |
+| **Remote browser**    | `STEEL_API_KEY=…` (Steel.dev) or `BROWSER_REMOTE_CDP_URL=wss://…` (Brightdata / Browserless)                                       | Run browser captures on a managed stealth-browser instead of a local Chrome — required to pass Cloudflare from a server. See below. |
+
+Stand up the managed services:
+
+* **Postgres** — use the pooled transaction endpoint (`*pooler.supabase.com:6543`). The
+  engine disables psycopg3 prepared statements (required for pgbouncer transaction mode)
+  and enables `pool_pre_ping`. The schema is created automatically and an in-place column
+  migration runs at startup (use Alembic for anything heavier).
+* **Supabase Storage** — create a bucket (e.g. `ai-tracker-storage`) and generate S3
+  access keys (**Storage → Settings → S3 Access Keys**). The endpoint is derived from
+  `SUPABASE_PROJECT_REF` (`https://<ref>.storage.supabase.co/storage/v1/s3`) or set
+  `SUPABASE_S3_ENDPOINT` directly; `SUPABASE_S3_REGION` is the project region (e.g.
+  `ap-northeast-1`). Artifacts land under `raw/ processed/ screenshots/ html/` keys and
+  are served via presigned URLs, or public object URLs if the bucket is public and
+  `SUPABASE_STORAGE_PUBLIC=true`. Verify connectivity with a write/read/delete
+  round-trip: `python -m scripts.check_storage`.
+* **Redis (broker)** — run it locally (e.g. via Homebrew):
+  ```bash
+  brew install redis
+  brew services start redis        # Verify with: redis-cli ping → PONG
+  ```
+
+Then create the schema:
+
+```bash
 python -m scripts.init_db
 ```
 
-### 2. Provider auth status
+##### 3. Provider auth status
 
 All providers run **anonymously** — no login required.
 
@@ -148,11 +151,9 @@ All providers run **anonymously** — no login required.
 | `google_ai`      | SerpAPI | Google AI Overview via SerpAPI (two-step `page_token`). Needs `SERP_API_KEY`.      |
 | `google_ai_mode` | SerpAPI | Google AI Mode via SerpAPI (`engine=google_ai_mode`). Needs `SERP_API_KEY`.        |
 
-Browser providers honor an optional `PROXY_URL` for proxy rotation. SerpAPI
-providers need no browser and never hit Cloudflare.
+Browser providers honor an optional `PROXY_URL` for proxy rotation. SerpAPI providers need no browser and never hit Cloudflare.
 
-Optional: if you *want* to use a signed-in session (higher ChatGPT rate limits,
-or Gemini features only available to logged-in users), run:
+**Optional (Logged-in Sessions):** If you *want* to use a signed-in session (for higher ChatGPT rate limits, or Gemini features only available to logged-in users), run:
 
 ```bash
 python -m scripts.login_provider chatgpt
@@ -161,61 +162,92 @@ python -m scripts.login_provider gemini
 
 Cookies persist to `./.browser_profiles/<provider>/` and are reused automatically.
 
-#### Cloudflare / consent on capture
+**Cloudflare / consent handling** — ChatGPT and Google Search sit behind Cloudflare
+Turnstile, which detects automation frameworks at the **CDP (Chrome DevTools Protocol)**
+level. We address this with:
+* **patchright**: A patched version of `playwright` that hides CDP fingerprints (highly recommended).
+* **Real Chrome** (`channel="chrome"`): Used preferentially if installed.
+* **Persistent profile**: Cookies and clearance tokens survive between runs.
+* **`HEADLESS=false`** (default in development): Pauses while any Turnstile challenge is solved.
 
-ChatGPT and Google Search sit behind Cloudflare Turnstile, which detects
-Playwright at the **CDP (Chrome DevTools Protocol)** level — no JS-level
-stealth script can hide this. We address it with:
+**Running browser captures on a server** — local Chrome (above) is for dev. In the
+cloud there's no display, the IP is a flagged datacenter range, and no human to solve a
+challenge. Point the browser providers at a managed stealth-browser service instead — it
+supplies residential IPs, stealth fingerprints, and CAPTCHA solving, and no local Chrome
+window opens:
 
-- **patchright** — a drop-in replacement for `playwright` that patches CDP
-  fingerprints. This is the actual fix; the JS stealth and launch args alone
-  are not enough. Falls back to vanilla playwright if patchright isn't installed
-  (you'll likely get challenged in that case).
-- **Real Chrome** (`channel="chrome"`) when installed, otherwise patchright's
-  bundled Chrome build, otherwise bundled Chromium.
-- **Persistent profile** so clearance cookies survive between runs.
-- **`wait_for_cloudflare`** that pauses while the challenge is visible.
-- **JS-level stealth** as a belt-and-suspenders defense in depth.
+* **Steel.dev** (free tier): `pip install steel-sdk`, then set `STEEL_API_KEY`. A Steel
+  session is created per capture. Reliability against Cloudflare is tiered:
+  * `STEEL_PERSIST_PROFILE=true` (default, any plan) — reuses one profile per provider so
+    a cleared challenge carries forward across runs. The main free-tier lever.
+  * `STEEL_PROXY_URL=` — bring your own residential proxy (any plan).
+  * `STEEL_USE_PROXY=true` / `STEEL_SOLVE_CAPTCHA=true` — Steel-managed proxy + CAPTCHA
+    solving; **require a paid plan** (the free plan rejects them). The reliable path.
+* **Brightdata / Browserless**: set `BROWSER_REMOTE_CDP_URL` to the service's `wss://` CDP
+  endpoint instead.
 
-**`HEADLESS=false` clears challenges far more reliably than headless mode.**
-Install Google Chrome (not just Chromium) for best results.
+SerpAPI providers (`google_ai`, `google_ai_mode`) need no browser and run server-side
+as-is. Verify connectivity before a real run with `python -m scripts.check_browser`
+(confirms connection only — actual Cloudflare bypass is proven by a real capture).
 
-### 3. (Optional) Seed example data so you can poke the dashboard without running a capture
+##### 4. (Optional) Seed example data
+
+To view the dashboard with pre-populated graphs without waiting for a fresh capture run:
 
 ```bash
 python -m scripts.seed_example
 ```
 
-### 4. Start backend
+##### 5. Start the backend services (separate terminals)
 
 ```bash
-uvicorn backend.main:app --reload
-# → http://127.0.0.1:8000
+# API
+uvicorn backend.main:app --reload          # → http://127.0.0.1:8000
+
+# Celery worker(s) — pass a count to run providers in parallel (see note below)
+./scripts/worker.sh 3                        # 3 parallel solo workers
+# ./scripts/worker.sh                        # 1 worker (sequential capture)
 ```
 
-### 5. Start frontend
+With the broker set, `POST /capture` returns immediately (`"mode": "celery"`) and the
+workers perform the scrape + NLP.
+
+**How the work is parallelised.** A capture batch is **fanned out one Celery task per
+provider**, so providers (ChatGPT, Gemini, Perplexity, Google AI…) are scraped **in
+parallel** across workers — within a single provider, prompts stay sequential to honor
+rate limiting and the circuit breaker. When every provider task finishes, a single chord
+callback runs the heavy NLP **sequentially**; inside each run, **NER and sentiment run on
+two threads concurrently** (torch and spaCy both release the GIL). To actually get parallel
+capture you need more than one worker process — `worker.sh N` launches `N` solo workers
+(each `--pool=solo`, required on macOS to avoid PyTorch/Playwright fork-safety crashes).
+The in-process fallback mode applies the same capture-parallel / process-sequential split
+within one process.
+
+> **Local fallback (backup option).** A zero-dependency mode is built in: leave
+> `DATABASE_URL`, `CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND`, and the `SUPABASE_*` vars
+> **unset** and the app runs fully local — SQLite, local `./storage`, and in-process
+> FastAPI background tasks (no Redis, no worker). Setup is just `python -m scripts.init_db`
+> then `uvicorn backend.main:app --reload`; skip steps 2 and the worker in step 5.
+
+#### Frontend
 
 ```bash
 cd frontend
 npm install
 npm run dev
-# → http://localhost:5173
+# → Dashboard running at http://localhost:5173
 ```
 
-## Usage
+---
+
+## Usage & Features
 
 1. Open the dashboard at `http://localhost:5173`.
-2. Create a project: name, domain, up to 5 prompts, optional competitors.
-3. Click **Run capture**. The backend launches Playwright in the background,
-   visits each provider, submits each prompt, waits for streaming completion,
-   captures the rendered DOM + a full-page screenshot, and writes a raw JSON
-   artifact under `storage/raw/`.
-4. The processing layer runs immediately after each capture: spaCy NER →
-   rapidfuzz normalization → mentions + citations persisted to SQLite.
-5. The Overview / Runs / Competitors / Providers pages query the analytics API
-   and render charts (Recharts) + tables.
+2. Create a project: name, domain, up to 5 prompts, and optional competitors.
+3. Click **Run capture**. The backend launches browser instances, visits each provider, submits the prompt, captures the response, saves a full-page screenshot, and writes the raw response under `storage/raw/`.
+4. The processing pipeline runs immediately after: spaCy NER → rapidfuzz normalization → mentions & citations persisted to the database.
 
-## What gets stored per run
+### What gets stored per run
 
 ```json
 {
@@ -232,107 +264,54 @@ npm run dev
 }
 ```
 
-Raw data is immutable. Re-running the processing layer (`POST /api/projects/{id}/reprocess`
-or the **Reprocess** button) re-derives mentions, citations, and rankings without
-re-scraping.
+Raw data is immutable. Re-running the processing layer (via the **Reprocess** button or `POST /api/projects/{id}/reprocess`) re-runs entity extraction and metrics without initiating new browser scrapes.
 
-## Dashboard pages
+### Sentiment & Framing (Local NLP)
 
-- **Overview** — visibility score, mention/citation totals, top-brands bar chart,
-  per-provider pie, a live **Capture Pipeline** panel, and a **Visibility Trend**
-  line chart (Competitor AI Visibility vs. your AI Agent Mentions over time).
-- **Prompt Runs** — every (provider × prompt) run with status + detail modal.
-- **Competitors** — co-mention analysis vs. the target brand.
-- **Providers** — brand × provider mention matrix.
-- **History** — chronological log of competitors added (manual vs. auto-detected)
-  and queries added.
+Runs **entirely locally** using a HuggingFace model (`cardiffnlp/twitter-roberta-base-sentiment-latest` by default, configured via `SENTIMENT_MODEL`).
+* **Sentiment**: Positive / Neutral / Negative.
+* **Framing**: Leader / Also-ran / Cautionary / Not-mentioned.
+* Toggle or disable via `ENABLE_SENTIMENT`. If HuggingFace dependencies are not installed, falls back gracefully to a lexicon ruleset.
 
-### Live capture pipeline
+### LLM Features (Gemini)
 
-Clicking **Run capture** pre-creates one `pending` run per (provider × prompt)
-and runs them in the background. The Overview page's **Capture Pipeline** panel
-polls every 2s and shows each step move through `Queued → Running →
-Succeeded/Failed`, grouped by provider — a Profound-style orchestrator view that
-stops polling once all steps settle.
+When `GEMINI_API_KEY` is provided, the dashboard unlocks:
+* **Prompt suggestions**: Proposed industry-specific high-intent search queries.
+* **Competitor auto-detection**: Auto-discovers and labels competitor brands in LLM outputs.
 
-## Brand intelligence
+---
 
-### Sentiment & framing (local model)
+## System Configuration Details
 
-Runs entirely **locally** in the processing layer — no API cost, no per-run
-network latency. For each run we detect how the target brand is portrayed:
+### Caching, TTL & Resilience
 
-- **sentiment**: positive / neutral / negative
-- **framing**: leader / also-ran / cautionary / not-mentioned
+| Concern | Setting | Behavior |
+| :--- | :--- | :--- |
+| **Capture Cache** | `CACHE_TTL_HOURS=24` | Reuses matching query captures within the threshold unless bypassed with `force_refresh`. |
+| **Artifact TTL** | `ARTIFACT_TTL_DAYS=7` | Purges raw HTML, screenshot images, and JSONs older than 7 days. SQL stats are kept. |
+| **Rate Limiting** | `PROVIDER_MIN_DELAY_SECONDS=3` | Minimum stagger delay between request executions per browser provider. |
+| **Circuit Breaker** | `CIRCUIT_BREAKER_THRESHOLD=3` | Fails active captures fast if a provider goes down (3 sequential errors) to avoid blocking the queue. |
 
-Sentiment uses a HuggingFace model (`cardiffnlp/twitter-roberta-base-sentiment-latest`
-by default, `SENTIMENT_MODEL`), loaded lazily on first use. If `transformers`/
-`torch` aren't installed it falls back to a built-in lexicon, so it always
-works. Framing is a rule-based read over the brand's sentences combined with the
-sentiment label. Shown per-run (Runs table + detail) and summarised on the
-Overview. Toggle with `ENABLE_SENTIMENT`. This is what turns a mention *counter*
-into a brand-intelligence tool.
-
-### LLM features (Gemini)
-
-With `GEMINI_API_KEY` set, two occasional (not per-run) features turn on:
-
-- **Prompt suggestions** — *Overview → Prompt suggestions → Generate.* Gemini
-  infers your industry from the domain + tracked prompts and proposes
-  high-intent queries your brand *should* appear in (unaided — brand name
-  excluded). Select and append them in one click.
-- **Competitor auto-detection** — replaces the old noisy per-run NER inference.
-  Gemini receives the domain + prompts + raw AI responses and returns clean,
-  deduplicated competitor brands (with a one-line reason each). Runs
-  automatically at the end of a capture batch, and on demand via
-  *Competitors → Auto-detect (AI)*.
-
-Both degrade gracefully: if `GEMINI_API_KEY` is unset they simply no-op and the
-core capture/processing pipeline is unaffected.
-
-## Geo-location
-
-Each project can carry a default `geo_location` (e.g. `"United States"`,
-`"London, England"`, `"Mumbai, India"`). It's passed to SerpAPI's `location`
-param for location-aware AI Overview / AI Mode results. Precedence at capture
-time: **request override → project default → `DEFAULT_GEO_LOCATION`**.
-
-## Caching, TTL & resilience
-
-These are configured in `.env` (sensible defaults shown):
-
-| Concern            | Setting(s)                                                              | Behaviour                                                                                                  |
-| ------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Result cache**   | `CACHE_TTL_HOURS=24`                                                     | A re-run reuses a recent successful capture for the same (project, provider, prompt, geo). `force_refresh` (capture menu) bypasses it. Cached runs are flagged in the UI. |
-| **Artifact TTL**   | `ARTIFACT_TTL_DAYS=7`, `CLEANUP_INTERVAL_HOURS=24`                       | Raw JSON + screenshots + HTML older than the TTL are purged (runs marked `purged`); aggregated DB rows are kept. Runs once at startup, then on the interval. Manual: `python -m scripts.cleanup [days]`. |
-| **Rate limiting**  | `PROVIDER_MIN_DELAY_SECONDS=3`                                          | Minimum delay between requests to the same provider.                                                       |
-| **Backoff**        | `PROVIDER_MAX_RETRIES=2`, `PROVIDER_BACKOFF_BASE=2.0`                    | Failed captures retry with exponential backoff (`base**attempt` seconds).                                  |
-| **Circuit breaker**| `CIRCUIT_BREAKER_THRESHOLD=3`                                            | After N consecutive failures for a provider, remaining jobs in that batch fail fast instead of hammering.  |
-| **Proxy (hook)**   | `PROXY_URL`                                                             | Optional proxy server for browser providers — proxy-rotation integration point.                            |
-
-## Visibility score
+### Visibility Score Calculation
 
 ```
 visibility_score =
    (prompts_where_brand_appears / total_prompts) * 100
-   + first_mention_bonus            (up to 10)
-   + min(citations, 5) * 2          (up to 10)
+   + first_mention_bonus            (up to 10 points)
+   + min(citations, 5) * 2          (up to 10 points)
    + multi_provider_bonus           ((providers_seen - 1) * 5)
    → capped at 100
 ```
 
-## Notes on selectors
-
-ChatGPT and Gemini ship UI changes regularly. Each provider keeps multiple
-fallback selectors. When a capture fails, the run row in the dashboard shows the
-error, and the screenshot + HTML are saved so you can replay processing later
-without re-scraping. To re-run all processing after updating selectors or NER:
-
+### Selector Maintenance
+When AI layouts change, selectors will break. Reprocess raw logs to update analytics once new rules are defined in providers:
 ```bash
 curl -X POST http://127.0.0.1:8000/api/projects/<id>/reprocess
 ```
 
-## Tech stack
+---
 
-- **Backend**: Python, FastAPI, Playwright (async), SQLAlchemy 2, SQLite, spaCy, rapidfuzz.
-- **Frontend**: React 18, Vite, TailwindCSS, Recharts, shadcn-styled components.
+## Tech Stack
+
+* **Backend**: Python 3.12, FastAPI, Playwright (CDP stealth), SQLAlchemy 2, spaCy, rapidfuzz.
+* **Frontend**: React 18, Vite, TailwindCSS, Recharts, shadcn components.

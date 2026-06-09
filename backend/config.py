@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     # Sentiment/framing runs locally via a HuggingFace model (no API cost).
     enable_sentiment: bool = True
     sentiment_model: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+    # Optional HF token — only helps model-download rate limits; the default
+    # model is public so no token is required. Propagated to HF_TOKEN on load.
+    hf_token: str = ""
 
     # Default geo for SerpAPI location-aware results (overridable per project/run)
     default_geo_location: str = "United States"
@@ -49,6 +52,33 @@ class Settings(BaseSettings):
 
     # Optional proxy (server URL) used for browser providers — proxy rotation hook
     proxy_url: str = ""
+
+    # Remote stealth-browser service: when set, connect over CDP to a managed
+    # browser instead of launching Chrome locally. The service supplies
+    # residential IPs, stealth fingerprints, and CAPTCHA solving — required to
+    # pass Cloudflare from the cloud. Leave both blank to launch a local Chrome.
+    #
+    # Steel.dev (a session is created per capture): set STEEL_API_KEY.
+    # Brightdata / Browserless (static wss URL): set BROWSER_REMOTE_CDP_URL.
+    # STEEL_API_KEY takes precedence when both are set.
+    steel_api_key: str = ""
+    browser_remote_cdp_url: str = ""
+
+    # Steel session hardening — needed to pass Cloudflare on ChatGPT/Google.
+    # use_proxy + solve_captcha require a PAID Steel plan (the free/hobby plan
+    # 400s if you send them, so they default off). steel_proxy_url is BYOP and
+    # works on any plan — point it at your own residential proxy.
+    steel_use_proxy: bool = False
+    steel_solve_captcha: bool = False
+    steel_proxy_url: str = ""
+    # Persist + reuse one Steel profile per provider so Cloudflare clearance and
+    # IP reputation carry across captures (the free-tier reliability lever — the
+    # challenge is solved once then skipped). Works on any plan.
+    steel_persist_profile: bool = True
+
+    @property
+    def browser_remote(self) -> bool:
+        return bool(self.steel_api_key or self.browser_remote_cdp_url)
 
     # Celery / Redis — when broker is set, captures run on workers; else inline
     celery_broker_url: str = ""

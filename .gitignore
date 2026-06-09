@@ -25,3 +25,8 @@ frontend/.vite/
 .DS_Store
 # logs
 *.log
+
+# Steel skill installs (per-developer tooling, not project code)
+.agents/
+.claude/skills/
+skills-lock.json

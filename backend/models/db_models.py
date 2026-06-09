@@ -102,3 +102,17 @@ class Competitor(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="competitors")
+
+
+class SteelProfile(Base):
+    """One persisted Steel browser profile per provider. Reusing a profile keeps
+    Cloudflare clearance cookies + IP reputation across captures, so the
+    challenge is cleared once then skipped — the free-tier reliability lever."""
+
+    __tablename__ = "steel_profiles"
+
+    provider: Mapped[str] = mapped_column(String(64), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )

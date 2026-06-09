@@ -6,6 +6,9 @@ from backend.models.db_models import (
     Project,
     Prompt,
     Run,
+    SteelProfile,
 )
 
-__all__ = ["Base", "Project", "Prompt", "Run", "Mention", "Citation", "Competitor"]
+__all__ = [
+    "Base", "Project", "Prompt", "Run", "Mention", "Citation", "Competitor", "SteelProfile",
+]
