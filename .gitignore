@@ -25,3 +25,9 @@ frontend/.vite/
 .DS_Store
 # logs
 *.log
+
+# Local frontend secrets
+frontend/.env.local
+
+# Vite local env
+.env.local
