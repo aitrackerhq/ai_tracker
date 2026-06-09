@@ -10,6 +10,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
   );
 }
 
+/**
+ * Shared Supabase client instance used across the frontend.
+ */
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,

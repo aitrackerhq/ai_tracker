@@ -3,6 +3,12 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
+/**
+ * Creates a new user account using Supabase authentication.
+ *
+ * Users are prompted to verify their email address before signing in.
+ */
+
 export default function SignupPage() {
   const navigate = useNavigate();
 
@@ -11,6 +17,10 @@ export default function SignupPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  /**
+   * Creates a new account and initiates email verification.
+   */
 
   async function handleSubmit(e) {
     e.preventDefault();

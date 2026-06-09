@@ -9,6 +9,12 @@ import App from "./App.jsx";
 import { AuthProvider } from "./contexts/AuthContext.jsx"; // ← ADD
 import "./index.css";
 
+/**
+ * Application entry point.
+ *
+ * Configures routing and authentication providers.
+ */
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <BrowserRouter>

@@ -1,6 +1,13 @@
 import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
+/**
+ * Guards protected routes from unauthenticated access.
+ *
+ * Redirects unauthenticated users to the login page while preserving
+ * the originally requested route for post-login navigation.
+ */
+
 export function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
   const location = useLocation();

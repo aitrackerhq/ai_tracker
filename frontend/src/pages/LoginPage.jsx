@@ -3,15 +3,26 @@ import { useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
+/**
+ * Login page for AI Tracker.
+ *
+ * Authenticates users using Supabase email/password authentication
+ * and redirects them back to their intended destination after login.
+ */
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from?.pathname ?? "/";
+  const infoMessage = location.state?.message ?? null;
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+
+  /**
+   * Attempts user authentication and handles login errors.
+   */
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -41,6 +52,12 @@ export default function LoginPage() {
           </h1>
           <p className="mt-2 text-sm text-text-muted">Sign in to continue</p>
         </div>
+
+        {infoMessage && (
+          <div className="mb-4 rounded-md border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-300">
+            {infoMessage}
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400">

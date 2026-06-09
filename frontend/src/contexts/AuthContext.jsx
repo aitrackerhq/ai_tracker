@@ -9,6 +9,13 @@ import { supabase } from "../lib/supabase";
 
 const AuthContext = createContext(null);
 
+/**
+ * Provides Supabase authentication state to the application.
+ *
+ * Exposes the current user, session, loading state, and sign-out functionality
+ * through React Context.
+ */
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
@@ -44,6 +51,12 @@ export function AuthProvider({ children }) {
     </AuthContext.Provider>
   );
 }
+
+/**
+ * Access the current authentication context.
+ *
+ * Must be used within an AuthProvider.
+ */
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
