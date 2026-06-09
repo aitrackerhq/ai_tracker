@@ -14,6 +14,13 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 class Base(DeclarativeBase):
     pass
 
+"""
+Application user profile.
+
+Authentication is managed by Supabase Auth.
+This table stores application-specific user information and owns projects.
+"""
+
 class Profile(Base):
     """
     Application user profile.

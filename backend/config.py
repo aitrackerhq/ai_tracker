@@ -27,8 +27,7 @@ class Settings(BaseSettings):
     gemini_api_keys: str = ""
     gemini_model: str = "gemini-flash-latest"
 
-    # Supabase JWT signing secret.
-    # Used by backend/auth.py to verify access tokens issued by Supabase Auth.
+    # Secret used to validate Supabase-issued JWT access tokens.
     supabase_jwt_secret: str = ""
 
     # Sentiment/framing runs locally via a HuggingFace model (no API cost).

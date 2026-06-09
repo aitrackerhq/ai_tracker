@@ -83,6 +83,12 @@ class CurrentUser:
 # ---------------------------------------------------------------------------
 # Dependency
 # ---------------------------------------------------------------------------
+"""
+Validate the Supabase access token and return the authenticated user.
+
+Raises:
+    HTTPException(401): If the token is missing, invalid, or expired.
+"""
 def get_current_user(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> CurrentUser:
@@ -126,4 +132,5 @@ def get_current_user(
 
 # Convenience alias — keeps route signatures to one import:
 #   current_user: AuthDep
+# Convenience dependency alias for authenticated routes.
 AuthDep = Annotated[CurrentUser, Depends(get_current_user)]

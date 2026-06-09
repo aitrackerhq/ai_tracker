@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api")
 
 
 # ---------- projects ----------
-
+# Creates a project owned by the authenticated user.
 @router.post("/projects", response_model=ProjectOut)
 def create_project(
     payload: ProjectCreate,
@@ -56,7 +56,7 @@ def create_project(
         db.flush()
         return _project_to_out(proj)
 
-
+# Returns only projects owned by the authenticated user.
 @router.get("/projects", response_model=list[ProjectOut])
 def list_projects(
     current_user: AuthDep,
@@ -69,7 +69,7 @@ def list_projects(
 ).all()
         return [_project_to_out(p) for p in projects]
 
-
+# Returns a project only if it belongs to the authenticated user.
 @router.get("/projects/{project_id}", response_model=ProjectOut)
 def get_project(
     project_id: int,
@@ -85,7 +85,7 @@ def get_project(
             raise HTTPException(404, "project not found")
         return _project_to_out(proj)
 
-
+# Deletes a project owned by the authenticated user.
 @router.delete("/projects/{project_id}")
 def delete_project(
     project_id: int,
