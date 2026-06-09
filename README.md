@@ -244,7 +244,7 @@ npm run dev
 
 1. Open the dashboard at `http://localhost:5173`.
 2. Create a project: name, domain, up to 5 prompts, and optional competitors.
-3. Click **Run capture**. The backend launches browser instances, visits each provider, submits the prompt, captures the response, saves a full-page screenshot, and writes the raw response under `storage/raw/`.
+3. Click **Run capture**. The backend launches browser instances, visits each provider, submits the prompt, captures the response, saves a full-page screenshot, and writes the raw response to the configured storage backend (local `storage/raw/`, or Supabase Storage in the scaled path).
 4. The processing pipeline runs immediately after: spaCy NER → rapidfuzz normalization → mentions & citations persisted to the database.
 
 ### What gets stored per run

@@ -20,6 +20,11 @@ export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 
 N="${1:-1}"
 
+if ! [[ "$N" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Usage: ./scripts/worker.sh [positive-integer-worker-count]" >&2
+  exit 2
+fi
+
 start_worker() {  # $1 = node name suffix
   "$VENV_PY" -A backend.tasks.celery_app worker \
     --pool=solo \

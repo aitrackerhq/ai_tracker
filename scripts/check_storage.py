@@ -70,7 +70,8 @@ def main() -> int:
     # 3. read back
     try:
         data = be.load_json(ref)
-        assert data.get("smoke") is True, f"unexpected payload: {data!r}"
+        if data.get("smoke") is not True:  # not assert — survives python -O
+            raise RuntimeError(f"unexpected payload: {data!r}")
         print("PASS  read object")
     except Exception as exc:  # noqa: BLE001
         print(f"FAIL  read object: {exc}")

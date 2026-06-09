@@ -297,7 +297,7 @@ class CaptureOrchestrator:
             return_exceptions=True,
         )
         attempted: list[int] = []
-        for provider_name, res in zip(by_provider.keys(), results):
+        for provider_name, res in zip(by_provider.keys(), results, strict=True):
             if isinstance(res, BaseException):
                 logger.exception("provider capture crashed: %s", provider_name, exc_info=res)
                 continue

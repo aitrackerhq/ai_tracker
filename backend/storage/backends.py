@@ -194,7 +194,10 @@ def _build_backend():
             logger.info("storage backend: Supabase Storage (bucket=%s)", settings.supabase_storage_bucket)
             return b
         except Exception:
-            logger.exception("Supabase Storage init failed; falling back to local storage")
+            # Fail fast: silently using local disk when remote is configured risks
+            # split-brain artifact refs (new local + old remote) across instances.
+            logger.exception("Supabase Storage init failed")
+            raise RuntimeError("Supabase Storage is enabled but failed to initialize")
     logger.info("storage backend: local disk (%s)", settings.storage_dir)
     return LocalBackend(settings.storage_dir)
 

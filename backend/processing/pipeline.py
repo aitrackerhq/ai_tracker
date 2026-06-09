@@ -144,6 +144,11 @@ def process_run(run_pk: int) -> dict[str, Any] | None:
             run.target_sentiment = framing.get("sentiment")
             run.target_framing = framing.get("framing")
             run.framing_rationale = framing.get("rationale")
+        else:
+            # keep reprocessing idempotent — clear any stale values
+            run.target_sentiment = None
+            run.target_framing = None
+            run.framing_rationale = None
 
         run.status = "processed"
 
@@ -185,17 +190,20 @@ def process_batch(run_ids: list[int]) -> list[int]:
     """
     with session_scope() as db:
         rows = db.scalars(select(Run).where(Run.id.in_(run_ids))).all()
-        plan = [(r.id, r.project_id, r.status) for r in rows]
+        # preserve the requested order — DB IN (...) return order is not guaranteed
+        by_id = {r.id: r for r in rows}
+        plan = [(rid, by_id[rid].project_id, by_id[rid].status) for rid in run_ids if rid in by_id]
 
     processed: list[int] = []
     project_ids: set[int] = set()
     for run_pk, project_id, status in plan:
-        project_ids.add(project_id)
         if status != "captured":
             continue
         try:
             process_run(run_pk)
             processed.append(run_pk)
+            # only detect competitors for projects that actually processed a run
+            project_ids.add(project_id)
         except Exception:
             logger.exception("processing failed for run %s", run_pk)
 
