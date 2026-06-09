@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _build_normalizer(project: Project) -> EntityNormalizer:
+    """Build an EntityNormalizer seeded with the project's brand + known competitors."""
     known: dict[str, list[str]] = {}
     # target brand
     root = brand_root_from_domain(project.domain) or project.name
@@ -35,6 +36,7 @@ def _build_normalizer(project: Project) -> EntityNormalizer:
 
 
 def _norm_key(s: str) -> str:
+    """Normalize a name to its canonical lookup key."""
     from backend.processing.normalizer import normalize_name
 
     return normalize_name(s)
@@ -172,6 +174,7 @@ def _extract_and_analyze(
 
 
 def _safe_framing(brand: str, text: str) -> dict | None:
+    """Run sentiment/framing analysis, returning None instead of raising on failure."""
     try:
         return analyze_framing(brand, text)
     except Exception:
@@ -219,6 +222,7 @@ def _detect_competitors(project_ids: set[int]) -> None:
     from backend.capture.competitors import detect_competitors_for_project
 
     async def _runner() -> None:
+        """Detect competitors for each project in turn, swallowing per-project errors."""
         for pid in project_ids:
             try:
                 await detect_competitors_for_project(pid)
@@ -240,7 +244,7 @@ def process_project(project_id: int) -> int:
 
 
 def _run_uid_from_path(path: str) -> str:
-    # raw paths are storage/raw/<uid>.json
+    """Extract the run uid from a raw artifact ref (storage/raw/<uid>.json)."""
     from pathlib import Path
 
     return Path(path).stem

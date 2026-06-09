@@ -17,6 +17,7 @@ from backend.config import settings
 
 
 def main() -> int:
+    """Run the Supabase Storage round-trip check; return a process exit code."""
     if not settings.storage_enabled:
         missing = [
             name

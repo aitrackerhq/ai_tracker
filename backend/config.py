@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
+    """Application settings loaded from environment and .env."""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = f"sqlite:///{ROOT / 'ai_tracker.db'}"
@@ -78,6 +79,7 @@ class Settings(BaseSettings):
 
     @property
     def browser_remote(self) -> bool:
+        """True when a managed remote browser (Steel or CDP endpoint) is configured."""
         return bool(self.steel_api_key or self.browser_remote_cdp_url)
 
     # Celery / Redis — when broker is set, captures run on workers; else inline
@@ -97,6 +99,7 @@ class Settings(BaseSettings):
 
     @property
     def supabase_s3_endpoint_url(self) -> str:
+        """S3 endpoint URL — explicit override, else derived from the project ref."""
         if self.supabase_s3_endpoint:
             return self.supabase_s3_endpoint
         if self.supabase_project_ref:
@@ -105,6 +108,7 @@ class Settings(BaseSettings):
 
     @property
     def storage_enabled(self) -> bool:
+        """True when all required Supabase Storage settings are present."""
         return bool(
             self.supabase_s3_access_key_id
             and self.supabase_s3_secret_access_key
@@ -115,6 +119,7 @@ class Settings(BaseSettings):
 
     @property
     def celery_enabled(self) -> bool:
+        """True when a Celery broker is configured."""
         return bool(self.celery_broker_url)
 
     api_host: str = "127.0.0.1"
@@ -122,21 +127,26 @@ class Settings(BaseSettings):
 
     @property
     def raw_dir(self) -> Path:
+        """Local directory for raw capture JSON."""
         return self.storage_dir / "raw"
 
     @property
     def processed_dir(self) -> Path:
+        """Local directory for processed JSON."""
         return self.storage_dir / "processed"
 
     @property
     def screenshots_dir(self) -> Path:
+        """Local directory for screenshots."""
         return self.storage_dir / "screenshots"
 
     @property
     def html_dir(self) -> Path:
+        """Local directory for saved HTML."""
         return self.storage_dir / "html"
 
     def ensure_dirs(self) -> None:
+        """Create the local artifact directories if missing."""
         for d in (
             self.raw_dir,
             self.processed_dir,

@@ -12,10 +12,12 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
+    """Declarative base for all ORM models."""
     pass
 
 
 class Project(Base):
+    """A tracked brand/site and its capture configuration."""
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -31,6 +33,7 @@ class Project(Base):
 
 
 class Prompt(Base):
+    """A search query belonging to a project."""
     __tablename__ = "prompts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -42,6 +45,7 @@ class Prompt(Base):
 
 
 class Run(Base):
+    """One provider×prompt capture and its processing results."""
     __tablename__ = "runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -68,6 +72,7 @@ class Run(Base):
 
 
 class Mention(Base):
+    """A normalized brand/entity mention extracted from a run's response."""
     __tablename__ = "mentions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -81,6 +86,7 @@ class Mention(Base):
 
 
 class Citation(Base):
+    """A source URL cited in a run's response."""
     __tablename__ = "citations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -93,6 +99,7 @@ class Citation(Base):
 
 
 class Competitor(Base):
+    """A competitor brand for a project (explicit or LLM-inferred)."""
     __tablename__ = "competitors"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

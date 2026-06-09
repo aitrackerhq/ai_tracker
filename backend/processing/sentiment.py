@@ -44,6 +44,7 @@ _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
 def _get_pipe():
+    """Lazily load and cache the HF sentiment pipeline; None if unavailable."""
     global _pipe, _pipe_loaded
     if _pipe_loaded:
         return _pipe
@@ -71,6 +72,7 @@ def _get_pipe():
 
 @lru_cache(maxsize=1)
 def _label_map() -> dict[str, str]:
+    """Map model label variants to negative/neutral/positive."""
     # cardiffnlp '-latest' returns negative/neutral/positive; older returns LABEL_0/1/2
     return {
         "negative": "negative", "neutral": "neutral", "positive": "positive",
@@ -79,11 +81,13 @@ def _label_map() -> dict[str, str]:
 
 
 def _brand_sentences(brand: str, text: str) -> list[str]:
+    """Return the sentences in text that mention the brand."""
     b = brand.lower()
     return [s for s in _SENT_SPLIT.split(text) if b in s.lower()]
 
 
 def _model_sentiment(text: str) -> str:
+    """Classify sentiment via the HF model, falling back to a lexicon."""
     pipe = _get_pipe()
     if pipe is not None:
         try:

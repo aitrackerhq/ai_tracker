@@ -38,12 +38,14 @@ logger = logging.getLogger(__name__)
 
 
 def _get_steel_profile(provider_name: str) -> str | None:
+    """Return the persisted Steel profile id for a provider, or None if unset."""
     with session_scope() as db:
         row = db.get(SteelProfile, provider_name)
         return row.profile_id if row else None
 
 
 def _set_steel_profile(provider_name: str, profile_id: str) -> None:
+    """Upsert the Steel profile id for a provider so future captures reuse it."""
     with session_scope() as db:
         row = db.get(SteelProfile, provider_name)
         if row is None:
@@ -271,10 +273,12 @@ class CaptureOrchestrator:
     """
 
     def __init__(self, run_ids: list[int], force_refresh: bool = False):
+        """Bind the orchestrator to pre-created run rows; force_refresh bypasses the cache."""
         self.run_ids = run_ids
         self.force_refresh = force_refresh
 
     def _load_jobs(self) -> list[tuple[int, int, str, str, str | None]]:
+        """Load (id, project_id, provider, prompt, geo) tuples for this batch's runs."""
         with session_scope() as db:
             rows = db.scalars(select(Run).where(Run.id.in_(self.run_ids))).all()
             return [(r.id, r.project_id, r.provider, r.prompt, r.geo_location) for r in rows]
@@ -384,6 +388,7 @@ class CaptureOrchestrator:
         prompt: str,
         geo: str | None,
     ) -> bool:
+        """Capture one prompt with exponential-backoff retries; True on success."""
         attempts = settings.provider_max_retries + 1
         last_err = "unknown error"
         for attempt in range(attempts):
@@ -410,6 +415,7 @@ class CaptureOrchestrator:
         prompt: str,
         geo: str | None,
     ) -> None:
+        """Run a single provider capture and persist its artifacts (status → captured)."""
         run_uid = new_run_id()
         provider = cls(ctx, geo_location=geo)
         try:
@@ -461,12 +467,14 @@ class CaptureOrchestrator:
         logger.info("run %s served from cache", run_pk)
 
     def _set_status(self, run_pk: int, status: str) -> None:
+        """Set a run's status."""
         with session_scope() as db:
             run = db.get(Run, run_pk)
             if run is not None:
                 run.status = status
 
     def _set_error(self, run_pk: int, message: str) -> None:
+        """Mark a run failed with an error message."""
         with session_scope() as db:
             run = db.get(Run, run_pk)
             if run is not None:
@@ -474,6 +482,7 @@ class CaptureOrchestrator:
                 run.error = message
 
     def _fail_all(self, run_pks: list[int], message: str) -> None:
+        """Mark every given run failed with the same message."""
         for pk in run_pks:
             self._set_error(pk, message)
 

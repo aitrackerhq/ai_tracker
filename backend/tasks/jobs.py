@@ -32,6 +32,7 @@ def _group_by_provider(run_ids: list[int]) -> dict[str, list[int]]:
 
 
 def _mark_runs_error(run_ids: list[int], message: str) -> None:
+    """Mark the given runs as errored (used when a provider task gives up)."""
     with session_scope() as db:
         for run in db.scalars(select(Run).where(Run.id.in_(run_ids))).all():
             run.status = "error"
@@ -66,6 +67,7 @@ if celery_app is not None:
 
     @celery_app.task(name="ai_tracker.reprocess")
     def reprocess_task(project_id: int):
+        """Celery task: re-run NLP processing for every run in a project."""
         return process_project(project_id)
 
 else:

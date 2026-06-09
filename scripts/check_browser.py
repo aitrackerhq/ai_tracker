@@ -21,6 +21,7 @@ from backend.config import settings
 
 
 async def _round_trip() -> str:
+    """Open a page through the configured browser, navigate, return the title."""
     from backend.capture.orchestrator import browser_context
 
     async with browser_context("smoke-test") as ctx:
@@ -33,6 +34,7 @@ async def _round_trip() -> str:
 
 
 def main() -> int:
+    """Run the remote-browser connectivity check; return a process exit code."""
     if not settings.browser_remote:
         print("No remote browser set (STEEL_API_KEY / BROWSER_REMOTE_CDP_URL) — "
               "browser providers launch Chrome locally.")
