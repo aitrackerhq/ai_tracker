@@ -21,5 +21,7 @@ psycopg[binary]>=3.1
 # Task queue (optional — falls back to in-process when no broker configured)
 celery>=5.4.0
 redis>=5.0.0
-# Cloudflare R2 / S3-compatible object storage (optional — falls back to local disk)
+# S3-compatible object storage (Supabase Storage; optional — falls back to local disk)
 boto3>=1.34.0
+# Steel.dev managed stealth browser (optional — only needed when STEEL_API_KEY is set)
+steel-sdk>=0.18.0

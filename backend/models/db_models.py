@@ -12,10 +12,11 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
-    pass
+    """Declarative base for all ORM models."""
 
 
 class Project(Base):
+    """A tracked brand/site and its capture configuration."""
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -31,6 +32,7 @@ class Project(Base):
 
 
 class Prompt(Base):
+    """A search query belonging to a project."""
     __tablename__ = "prompts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -42,6 +44,7 @@ class Prompt(Base):
 
 
 class Run(Base):
+    """One (provider, prompt) capture and its processing results."""
     __tablename__ = "runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -68,6 +71,7 @@ class Run(Base):
 
 
 class Mention(Base):
+    """A normalized brand/entity mention extracted from a run's response."""
     __tablename__ = "mentions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -81,6 +85,7 @@ class Mention(Base):
 
 
 class Citation(Base):
+    """A source URL cited in a run's response."""
     __tablename__ = "citations"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -93,6 +98,7 @@ class Citation(Base):
 
 
 class Competitor(Base):
+    """A competitor brand for a project (explicit or LLM-inferred)."""
     __tablename__ = "competitors"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -102,3 +108,17 @@ class Competitor(Base):
     created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="competitors")
+
+
+class SteelProfile(Base):
+    """One persisted Steel browser profile per provider. Reusing a profile keeps
+    Cloudflare clearance cookies + IP reputation across captures, so the
+    challenge is cleared once then skipped — the free-tier reliability lever."""
+
+    __tablename__ = "steel_profiles"
+
+    provider: Mapped[str] = mapped_column(String(64), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )

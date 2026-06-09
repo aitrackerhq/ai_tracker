@@ -26,6 +26,11 @@ frontend/.vite/
 # logs
 *.log
 
+# Steel skill installs (per-developer tooling, not project code)
+.agents/
+.claude/skills/
+skills-lock.json
+
 # Local frontend secrets
 frontend/.env.local
 
