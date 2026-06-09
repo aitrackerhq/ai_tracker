@@ -425,7 +425,7 @@ class CaptureOrchestrator:
             self._set_status(run_pk, "running")
             await provider.initialize()
             result = await provider.capture(prompt, run_uid)
-            # persist artifacts through the storage backend (local disk or R2)
+            # persist artifacts through the storage backend (local disk or Supabase Storage)
             raw_ref = storage.put_json("raw", run_uid, result.to_dict())
             screenshot_ref = (
                 storage.put_artifact("screenshots", run_uid, result.screenshot_path)

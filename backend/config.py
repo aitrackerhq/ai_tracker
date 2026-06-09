@@ -32,7 +32,8 @@ class Settings(BaseSettings):
     enable_sentiment: bool = True
     sentiment_model: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"
     # Optional HF token — only helps model-download rate limits; the default
-    # model is public so no token is required. Propagated to HF_TOKEN on load.
+    # model is public so no token is required. When non-empty, it's set into
+    # HF_TOKEN as the sentiment pipeline initializes (see sentiment._get_pipe).
     hf_token: str = ""
 
     # Default geo for SerpAPI location-aware results (overridable per project/run)

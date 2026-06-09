@@ -13,7 +13,6 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
-    pass
 
 
 class Project(Base):
@@ -45,7 +44,7 @@ class Prompt(Base):
 
 
 class Run(Base):
-    """One provider×prompt capture and its processing results."""
+    """One (provider, prompt) capture and its processing results."""
     __tablename__ = "runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
