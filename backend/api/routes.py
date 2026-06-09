@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import select
+from backend.auth import AuthDep
 
 from backend.analytics import AnalyticsService
 from backend.api.schemas import (
@@ -29,12 +30,16 @@ router = APIRouter(prefix="/api")
 # ---------- projects ----------
 
 @router.post("/projects", response_model=ProjectOut)
-def create_project(payload: ProjectCreate) -> ProjectOut:
+def create_project(
+    payload: ProjectCreate,
+    current_user: AuthDep,
+) -> ProjectOut:
     if not payload.name or not payload.domain:
         raise HTTPException(400, "name and domain are required")
     with session_scope() as db:
         valid_providers = [p for p in payload.providers if p in PROVIDER_REGISTRY]
         proj = Project(
+            user_id=current_user.id,
             name=payload.name.strip(),
             domain=payload.domain.strip().lower(),
             geo_location=(payload.geo_location or "").strip() or None,
@@ -53,25 +58,45 @@ def create_project(payload: ProjectCreate) -> ProjectOut:
 
 
 @router.get("/projects", response_model=list[ProjectOut])
-def list_projects() -> list[ProjectOut]:
+def list_projects(
+    current_user: AuthDep,
+) -> list[ProjectOut]:
     with session_scope() as db:
-        projects = db.scalars(select(Project).order_by(Project.created_at.desc())).all()
+        projects = db.scalars(
+    select(Project)
+    .where(Project.user_id == current_user.id)
+    .order_by(Project.created_at.desc())
+).all()
         return [_project_to_out(p) for p in projects]
 
 
 @router.get("/projects/{project_id}", response_model=ProjectOut)
-def get_project(project_id: int) -> ProjectOut:
+def get_project(
+    project_id: int,
+    current_user: AuthDep,
+) -> ProjectOut:
     with session_scope() as db:
-        proj = db.get(Project, project_id)
+        proj = db.scalar(
+    select(Project)
+    .where(Project.id == project_id)
+    .where(Project.user_id == current_user.id)
+)
         if proj is None:
             raise HTTPException(404, "project not found")
         return _project_to_out(proj)
 
 
 @router.delete("/projects/{project_id}")
-def delete_project(project_id: int) -> dict:
+def delete_project(
+    project_id: int,
+    current_user: AuthDep,
+) -> dict:
     with session_scope() as db:
-        proj = db.get(Project, project_id)
+        proj = db.scalar(
+    select(Project)
+    .where(Project.id == project_id)
+    .where(Project.user_id == current_user.id)
+)
         if proj is None:
             raise HTTPException(404, "project not found")
         # remove on-disk artifacts first so deleting a project doesn't orphan files

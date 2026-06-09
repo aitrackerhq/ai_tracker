@@ -23,3 +23,6 @@ celery>=5.4.0
 redis>=5.0.0
 # Cloudflare R2 / S3-compatible object storage (optional — falls back to local disk)
 boto3>=1.34.0
+
+#supabase 
+python-jose[cryptography]

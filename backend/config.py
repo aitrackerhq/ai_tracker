@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     gemini_api_keys: str = ""
     gemini_model: str = "gemini-flash-latest"
 
+    # Supabase JWT signing secret.
+    # Used by backend/auth.py to verify access tokens issued by Supabase Auth.
+    supabase_jwt_secret: str = ""
+
     # Sentiment/framing runs locally via a HuggingFace model (no API cost).
     enable_sentiment: bool = True
     sentiment_model: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"

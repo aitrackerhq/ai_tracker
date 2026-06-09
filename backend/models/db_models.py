@@ -14,11 +14,65 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 class Base(DeclarativeBase):
     pass
 
+class Profile(Base):
+    """
+    Application user profile.
+
+    Supabase Auth stores authentication.
+    This table stores application-specific user data and
+    owns projects.
+    """
+
+    __tablename__ = "profiles"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        nullable=False,
+    )
+
+    email: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
+    )
+
+    projects: Mapped[list["Project"]] = relationship(
+        back_populates="owner"
+    )
 
 class Project(Base):
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    
+    # Supabase user UUID that owns this project
+    user_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     domain: Mapped[str] = mapped_column(String(255), nullable=False)
     geo_location: Mapped[str | None] = mapped_column(String(128), nullable=True)
@@ -28,7 +82,9 @@ class Project(Base):
     prompts: Mapped[list["Prompt"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     runs: Mapped[list["Run"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     competitors: Mapped[list["Competitor"]] = relationship(back_populates="project", cascade="all, delete-orphan")
-
+    owner: Mapped["Profile | None"] = relationship(
+        back_populates="projects"
+    )
 
 class Prompt(Base):
     __tablename__ = "prompts"
