@@ -3,8 +3,6 @@
 These assert the exact values from the scoring spec so the math can't silently
 drift, plus the determinism / monotonicity properties the issue requires.
 """
-import math
-
 import pytest
 
 from backend.scoring import components as C
