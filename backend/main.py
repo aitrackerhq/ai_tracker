@@ -38,7 +38,7 @@ def _ensure_columns() -> None:
         ],
         "prompts": [("created_at", dt)],
         "competitors": [("created_at", dt)],
-        "projects": [("geo_location", "VARCHAR(128)"), ("providers", "VARCHAR(255)")],
+        "projects": [("geo_location", "VARCHAR(128)"),("providers", "VARCHAR(255)"),("user_id", "VARCHAR(36)")],
     }
 
     def _existing(conn, table: str) -> set[str] | None:
@@ -76,7 +76,7 @@ def _ensure_columns() -> None:
                     logger.info("migrating %s: add %s.%s", dialect, table, col)
                     conn.exec_driver_sql(
                         f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coltype}"
-                    )
+                    ) 
 
 
 async def _cleanup_loop() -> None:

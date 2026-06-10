@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     gemini_api_keys: str = ""
     gemini_model: str = "gemini-flash-latest"
 
+    # Secret used to validate Supabase-issued JWT access tokens.
+    supabase_jwt_secret: str = ""
+    supabase_url: str = ""  # Required for ES256 JWT verification via JWKS
+
     # Sentiment/framing runs locally via a HuggingFace model (no API cost).
     enable_sentiment: bool = True
     sentiment_model: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"

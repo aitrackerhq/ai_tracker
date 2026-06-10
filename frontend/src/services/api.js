@@ -1,15 +1,30 @@
+import { supabase } from "../lib/supabase";
+
 const BASE = import.meta.env.VITE_API_URL || "";
 
 async function request(path, opts = {}) {
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  const token = session?.access_token;
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(opts.headers || {}),
+    },
     ...opts,
   });
+
   if (!res.ok) {
     const txt = await res.text();
     throw new Error(`${res.status} ${res.statusText}: ${txt}`);
   }
+
   if (res.status === 204) return null;
+
   return res.json();
 }
 

@@ -4,11 +4,12 @@ from backend.models.db_models import (
     Competitor,
     Mention,
     Project,
+    Profile,
     Prompt,
     Run,
     SteelProfile,
 )
 
 __all__ = [
-    "Base", "Project", "Prompt", "Run", "Mention", "Citation", "Competitor", "SteelProfile",
+    "Base", "Project","Profile", "Prompt", "Run", "Mention", "Citation", "Competitor", "SteelProfile",
 ]

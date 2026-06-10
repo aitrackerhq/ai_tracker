@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -14,22 +14,77 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 class Base(DeclarativeBase):
     """Declarative base for all ORM models."""
 
+class Profile(Base):
+    """
+    Application-level user profile, keyed by the Supabase Auth user UUID.
+
+    Authentication is handled entirely by Supabase; this table stores
+    application-specific data and is the ownership anchor for projects.
+    """
+
+    __tablename__ = "profiles"
+
+    id: Mapped[str] = mapped_column(
+        String(36),
+        primary_key=True,
+        nullable=False,
+    )
+
+    email: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    projects: Mapped[list["Project"]] = relationship(
+        back_populates="owner"
+    )
 
 class Project(Base):
     """A tracked brand/site and its capture configuration."""
     __tablename__ = "projects"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    
+    # Supabase user UUID that owns this project
+    user_id: Mapped[str] = mapped_column(
+        String(36),
+        ForeignKey("profiles.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     domain: Mapped[str] = mapped_column(String(255), nullable=False)
     geo_location: Mapped[str | None] = mapped_column(String(128), nullable=True)
     providers: Mapped[str | None] = mapped_column(String(255), nullable=True)  # comma-separated
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     prompts: Mapped[list["Prompt"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     runs: Mapped[list["Run"]] = relationship(back_populates="project", cascade="all, delete-orphan")
     competitors: Mapped[list["Competitor"]] = relationship(back_populates="project", cascade="all, delete-orphan")
-
+    owner: Mapped["Profile"] = relationship(
+        back_populates="projects"
+    )
 
 class Prompt(Base):
     """A search query belonging to a project."""
@@ -38,7 +93,7 @@ class Prompt(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     prompt_text: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="prompts")
 
@@ -63,7 +118,7 @@ class Run(Base):
     target_sentiment: Mapped[str | None] = mapped_column(String(32), nullable=True)
     target_framing: Mapped[str | None] = mapped_column(String(32), nullable=True)
     framing_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
     project: Mapped["Project"] = relationship(back_populates="runs")
     mentions: Mapped[list["Mention"]] = relationship(back_populates="run", cascade="all, delete-orphan")
@@ -105,7 +160,7 @@ class Competitor(Base):
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     competitor_name: Mapped[str] = mapped_column(String(255), nullable=False)
     inferred: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=datetime.utcnow, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=True)
 
     project: Mapped["Project"] = relationship(back_populates="competitors")
 
@@ -120,5 +175,5 @@ class SteelProfile(Base):
     provider: Mapped[str] = mapped_column(String(64), primary_key=True)
     profile_id: Mapped[str] = mapped_column(String(128), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False
     )
