@@ -51,8 +51,13 @@ export function Sidebar() {
     : [];
 
   const handleLogout = async () => {
-    await signOut();
-    navigate("/login", { replace: true });
+    try {
+      await signOut();
+      navigate("/login", { replace: true });
+    } catch (error) {
+      console.error("Logout failed:", error);
+      // TODO: Show user-facing error message (e.g., toast notification)
+    }
   };
 
   return (
