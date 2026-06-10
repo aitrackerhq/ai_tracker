@@ -17,6 +17,92 @@ const linkInactive =
   "text-text-muted hover:text-text-primary hover:bg-bg-hover";
 const linkActive = "bg-bg-hover text-text-primary";
 
+/**
+ * Derives a display name and initials from the Supabase user object.
+ *
+ * Name source priority:
+ *   1. user.user_metadata.name  — set during signUp({ options: { data: { name } } })
+ *   2. user.email               — fallback when no name was provided
+ *
+ * Initials are the first 1-2 letters of the display name, uppercased.
+ */
+function getUserDisplay(user) {
+  const name = user?.user_metadata?.name?.trim() || "";
+  const email = user?.email || "";
+  const displayName = name || email;
+
+  // Build initials: "John Doe" → "JD", "shubham" → "S", "a@b.com" → "A"
+  const initials = displayName
+    .split(/[\s@]+/) // split on spaces or @ (handles email fallback)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("");
+
+  return { displayName, email, initials };
+}
+
+/**
+ * Avatar circle showing the user's initials.
+ * Matches the existing accent colour used for the "AI" logo badge.
+ */
+function Avatar({ initials }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="w-8 h-8 rounded-full bg-accent/20 border border-accent/30 flex items-center justify-center shrink-0"
+    >
+      <span className="text-xs font-semibold text-accent leading-none">
+        {initials}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Bottom-of-sidebar user profile block.
+ * Shows avatar + name/email + a logout button row.
+ */
+function UserFooter({ user, onLogout }) {
+  const { displayName, email, initials } = getUserDisplay(user);
+  // Only show email separately when the display name is NOT the email itself
+  const showEmail = displayName !== email;
+
+  return (
+    <div className="px-3 py-3 flex flex-col gap-1">
+      {/* Identity row */}
+      <div className="flex items-center gap-2.5 px-2 py-2 rounded-md">
+        <Avatar initials={initials} />
+        <div className="min-w-0 flex-1">
+          <div
+            className="text-sm font-medium text-text-primary leading-tight truncate"
+            title={displayName}
+          >
+            {displayName}
+          </div>
+          {showEmail && (
+            <div
+              className="text-[11px] text-text-muted leading-tight truncate mt-0.5"
+              title={email}
+            >
+              {email}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Logout button */}
+      <button
+        onClick={onLogout}
+        className={clsx(linkBase, linkInactive, "w-full text-left")}
+      >
+        <LogOut size={16} />
+        Log out
+      </button>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
@@ -56,12 +142,14 @@ export function Sidebar() {
       navigate("/login", { replace: true });
     } catch (error) {
       console.error("Logout failed:", error);
-      // TODO: Show user-facing error message (e.g., toast notification)
+      // MVP: console logging is sufficient.
+      // When notifications/settings are added, surface auth errors via toast UI.
     }
   };
 
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-bg-panel h-screen sticky top-0 flex flex-col">
+      {/* ── Logo ── */}
       <div className="px-5 py-5 border-b border-border">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center text-white text-xs font-bold">
@@ -76,6 +164,7 @@ export function Sidebar() {
         </div>
       </div>
 
+      {/* ── Nav links ── */}
       <nav className="p-3 flex flex-col gap-0.5 flex-1">
         <NavLink
           to="/"
@@ -107,17 +196,10 @@ export function Sidebar() {
         )}
       </nav>
 
-      <div className="px-3 py-3 border-t border-border flex flex-col gap-1">
-        {user && (
-          <button
-            onClick={handleLogout}
-            className={clsx(linkBase, linkInactive, "w-full text-left")}
-          >
-            <LogOut size={16} />
-            Log out
-          </button>
-        )}
-        <div className="px-3 text-[10px] text-text-dim">
+      {/* ── User profile footer ── */}
+      <div className="border-t border-border">
+        {user && <UserFooter user={user} onLogout={handleLogout} />}
+        <div className="px-5 pb-3 text-[10px] text-text-dim">
           Phase 1 MVP · local
         </div>
       </div>
