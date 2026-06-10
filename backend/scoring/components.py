@@ -43,7 +43,7 @@ def wilson_interval(k: float, n: float, z: float = Z_95) -> tuple[float, float]:
 
 
 def bayesian_mean(k: float, n: float, alpha: float = 2.0, beta: float = 2.0) -> float:
-    """Beta-Binomial posterior mean (k+α)/(n+α+β). Used for n<10 sparse data.
+    """Beta-Binomial posterior mean (k+alpha)/(n+alpha+beta). Used for n<10 sparse data.
 
     Beta(2,2) is a weak symmetric prior (mean 0.5) that pulls extremes to centre.
     """

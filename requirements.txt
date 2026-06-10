@@ -31,4 +31,4 @@ steel-sdk>=0.18.0
 python-jose[cryptography]==3.5.0
 
 # Tests
-pytest>=8.0.0
+pytest>=9.0.3  # >=9.0.3 avoids GHSA-6w46-j5rx-g56g (tmpdir handling)

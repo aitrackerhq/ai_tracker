@@ -5,7 +5,7 @@ Maps the scoring spec onto this project's real schema:
   - "brand"      → a normalized entity (the project's target brand, or a competitor)
   - "capture"    → a processed Run
 
-The engine produces a deterministic snapshot: the six components (P1–P6), the
+The engine produces a deterministic snapshot: the six components (P1-P6), the
 composite GEO_raw, the confidence scalar, and GEO_final, plus reliability metadata.
 EMA smoothing and period-over-period significance are layered at persistence time
 (they need stored history), not here — keeping this snapshot reproducible.
@@ -51,7 +51,7 @@ class BrandScore:
     geo_raw: float = 0.0
     confidence_scalar: float = 0.0
     geo_adjusted: float = 0.0
-    geo_final: float = 0.0  # 0–100, one decimal
+    geo_final: float = 0.0  # 0-100, one decimal
     # audit / reliability
     wilson_ci_lower: float = 0.0
     wilson_ci_upper: float = 1.0
@@ -151,8 +151,6 @@ class ScoringEngine:
                     select(Competitor).where(Competitor.project_id == self.project_id)
                 ).all()
             )
-            target_root = brand_root_from_domain(project.domain) or project.name
-
             scored = [r for r in runs if r.status == _SCORED_STATUS]
             failed = [r for r in runs if r.status == "error"]
             n = len(scored)
@@ -160,7 +158,15 @@ class ScoringEngine:
             capture_failure_rate = (len(failed) / attempted) if attempted else 0.0
             n_effective = n * (1 - capture_failure_rate)
 
-            raw, target_name, provider_totals = self._scan(scored, target_root)
+            raw, target_name, provider_totals = self._scan(scored)
+
+            # P6 denominator: each provider's TOTAL run count, applied to every
+            # brand (k stays per-brand). Done after the scan so brands discovered
+            # mid-dataset aren't undercounted, and absent-on-a-provider counts as
+            # 0/n there, correctly lowering provider authority.
+            for r in raw.values():
+                for prov, totals in provider_totals.items():
+                    r.provider_kn[prov][1] = totals["runs"]
 
             total_brand_mentions = sum(r.mentions for r in raw.values())
             sov_available = len(competitors) >= 2 and total_brand_mentions > 0
@@ -175,7 +181,6 @@ class ScoringEngine:
                         n_effective=n_effective,
                         total_brand_mentions=total_brand_mentions,
                         sov_available=sov_available,
-                        provider_totals=provider_totals,
                     )
                 )
             rows.sort(key=lambda b: b.geo_final, reverse=True)
@@ -204,7 +209,7 @@ class ScoringEngine:
     # ---- internals ----
 
     def _scan(
-        self, scored: list[Run], target_root: str
+        self, scored: list[Run]
     ) -> tuple[dict[str, _Raw], str | None, dict[str, dict[str, int]]]:
         """Single pass over processed runs → per-brand accumulators."""
         raw: dict[str, _Raw] = {}
@@ -243,12 +248,10 @@ class ScoringEngine:
                 if rank == 1:
                     r.first_mentions += 1
 
-            # provider per-brand k/n
-            for name in raw:
-                kn = raw[name].provider_kn[run.provider]
-                kn[1] += 1  # n for this provider
-                if run.id in raw[name].appeared_run_ids and name in first_rank:
-                    kn[0] += 1  # k for this provider
+            # provider per-brand appearances (k only); the n denominator is set
+            # to each provider's total run count after the scan (see compute).
+            for name in first_rank:
+                raw[name].provider_kn[run.provider][0] += 1
 
             # citations → attribute to a brand by domain-root match (quality 1.0 for now)
             for c in run.citations:
@@ -281,7 +284,6 @@ class ScoringEngine:
         n_effective: float,
         total_brand_mentions: int,
         sov_available: bool,
-        provider_totals: dict[str, dict[str, int]],
     ) -> BrandScore:
         cfg = self.config
         k = len(r.appeared_run_ids)
