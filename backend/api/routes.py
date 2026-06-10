@@ -151,6 +151,9 @@ def trigger_capture(
         prompts = payload.prompts or [p.prompt_text for p in proj.prompts]
         # geo precedence: request override → project default → global default
         geo = payload.geo_location or proj.geo_location or settings.default_geo_location
+        # Persist the chosen providers as the project's default for next time
+        if payload.providers:
+            proj.providers = ",".join(payload.providers)
 
     if not prompts:
         raise HTTPException(400, "no prompts to run")
@@ -158,12 +161,6 @@ def trigger_capture(
     unknown = [p for p in payload.providers if p not in PROVIDER_REGISTRY]
     if unknown:
         raise HTTPException(400, f"unknown providers: {unknown}")
-
-    # Persist the chosen providers as the project's default for next time.
-    with session_scope() as db:
-        proj = _get_owned_project(db, project_id, current_user.id)
-        if payload.providers:
-            proj.providers = ",".join(payload.providers)
 
     # Pre-create all (provider × prompt) runs as "pending" so the dashboard can
     # render the full pipeline immediately, then dispatch to a worker (Celery) or
