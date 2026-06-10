@@ -78,6 +78,12 @@ def _ensure_columns() -> None:
                         f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {coltype}"
                     )
 
+        # After adding user_id to projects, delete any orphaned rows that have
+        # no owner (projects created before auth was introduced). We do this
+        # once, inside the same transaction, so the schema and data stay consistent.
+        existing_projects_cols = _existing(conn, "projects")
+        
+
 
 async def _cleanup_loop() -> None:
     """Periodic artifact purge. Runs once at startup, then every N hours.

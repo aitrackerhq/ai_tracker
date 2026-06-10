@@ -18,7 +18,7 @@ from backend.capture.competitors import detect_competitors_for_project
 from backend.config import settings
 from backend.database.session import session_scope
 from backend.llm import gemini, service as llm_service
-from backend.models import Competitor, Project, Prompt
+from backend.models import Competitor, Profile, Project, Prompt
 from backend.providers import PROVIDER_REGISTRY
 from backend.storage import backends as storage
 from backend.storage import purge_run_files
@@ -37,6 +37,13 @@ def create_project(
     if not payload.name or not payload.domain:
         raise HTTPException(400, "name and domain are required")
     with session_scope() as db:
+        # Ensure a Profile row exists for this user before creating a Project.
+        # Project.user_id is a non-null FK to profiles.id; without this the
+        # very first project creation on a fresh DB will raise an FK violation.
+        profile = db.get(Profile, current_user.id)
+        if profile is None:
+            db.add(Profile(id=current_user.id, email=current_user.email))
+            db.flush()
         valid_providers = [p for p in payload.providers if p in PROVIDER_REGISTRY]
         proj = Project(
             user_id=current_user.id,
@@ -146,6 +153,12 @@ def trigger_capture(
     bg: BackgroundTasks,
     current_user: AuthDep,
 ) -> dict:
+    # Validate providers BEFORE opening a DB session so invalid values are
+    # never written to projects.providers.
+    unknown = [p for p in payload.providers if p not in PROVIDER_REGISTRY]
+    if unknown:
+        raise HTTPException(400, f"unknown providers: {unknown}")
+
     with session_scope() as db:
         proj = _get_owned_project(db, project_id, current_user.id)
         prompts = payload.prompts or [p.prompt_text for p in proj.prompts]
@@ -157,10 +170,6 @@ def trigger_capture(
 
     if not prompts:
         raise HTTPException(400, "no prompts to run")
-
-    unknown = [p for p in payload.providers if p not in PROVIDER_REGISTRY]
-    if unknown:
-        raise HTTPException(400, f"unknown providers: {unknown}")
 
     # Pre-create all (provider × prompt) runs as "pending" so the dashboard can
     # render the full pipeline immediately, then dispatch to a worker (Celery) or
