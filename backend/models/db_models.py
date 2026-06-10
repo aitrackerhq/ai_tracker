@@ -73,10 +73,10 @@ class Project(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     
     # Supabase user UUID that owns this project
-    user_id: Mapped[str | None] = mapped_column(
+    user_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("profiles.id", ondelete="CASCADE"),
-        nullable=True,
+        nullable=False,
         index=True,
     )
 
