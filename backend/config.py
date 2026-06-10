@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
+    """Application settings loaded from environment and .env."""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = f"sqlite:///{ROOT / 'ai_tracker.db'}"
@@ -33,6 +34,10 @@ class Settings(BaseSettings):
     # Sentiment/framing runs locally via a HuggingFace model (no API cost).
     enable_sentiment: bool = True
     sentiment_model: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+    # Optional HF token — only helps model-download rate limits; the default
+    # model is public so no token is required. When non-empty, it's set into
+    # HF_TOKEN as the sentiment pipeline initializes (see sentiment._get_pipe).
+    hf_token: str = ""
 
     # Default geo for SerpAPI location-aware results (overridable per project/run)
     default_geo_location: str = "United States"
@@ -53,26 +58,72 @@ class Settings(BaseSettings):
     # Optional proxy (server URL) used for browser providers — proxy rotation hook
     proxy_url: str = ""
 
+    # Remote stealth-browser service: when set, connect over CDP to a managed
+    # browser instead of launching Chrome locally. The service supplies
+    # residential IPs, stealth fingerprints, and CAPTCHA solving — required to
+    # pass Cloudflare from the cloud. Leave both blank to launch a local Chrome.
+    #
+    # Steel.dev (a session is created per capture): set STEEL_API_KEY.
+    # Brightdata / Browserless (static wss URL): set BROWSER_REMOTE_CDP_URL.
+    # STEEL_API_KEY takes precedence when both are set.
+    steel_api_key: str = ""
+    browser_remote_cdp_url: str = ""
+
+    # Steel session hardening — needed to pass Cloudflare on ChatGPT/Google.
+    # use_proxy + solve_captcha require a PAID Steel plan (the free/hobby plan
+    # 400s if you send them, so they default off). steel_proxy_url is BYOP and
+    # works on any plan — point it at your own residential proxy.
+    steel_use_proxy: bool = False
+    steel_solve_captcha: bool = False
+    steel_proxy_url: str = ""
+    # Persist + reuse one Steel profile per provider so Cloudflare clearance and
+    # IP reputation carry across captures (the free-tier reliability lever — the
+    # challenge is solved once then skipped). Works on any plan.
+    steel_persist_profile: bool = True
+
+    @property
+    def browser_remote(self) -> bool:
+        """True when a managed remote browser (Steel or CDP endpoint) is configured."""
+        return bool(self.steel_api_key or self.browser_remote_cdp_url)
+
     # Celery / Redis — when broker is set, captures run on workers; else inline
     celery_broker_url: str = ""
     celery_result_backend: str = ""
 
-    # Cloudflare R2 (S3-compatible) — when configured, artifacts go to the bucket
-    # instead of local disk. Leave blank to use local ./storage.
-    r2_account_id: str = ""
-    r2_access_key_id: str = ""
-    r2_secret_access_key: str = ""
-    r2_bucket: str = ""
-    r2_endpoint_url: str = ""          # defaults to https://<account>.r2.cloudflarestorage.com
-    r2_public_base_url: str = ""       # optional public/CDN base for serving artifacts
+    # Supabase Storage (S3-compatible) — when configured, artifacts go to the
+    # bucket instead of local disk. Leave blank to use local ./storage.
+    # S3 access keys are generated in Supabase: Storage → Settings → S3 access keys.
+    supabase_project_ref: str = ""        # e.g. aeudrluqrzvfiyumnjsf
+    supabase_s3_region: str = ""          # e.g. ap-northeast-1 (project region)
+    supabase_s3_access_key_id: str = ""
+    supabase_s3_secret_access_key: str = ""
+    supabase_storage_bucket: str = ""
+    supabase_s3_endpoint: str = ""        # override; else derived from project_ref
+    supabase_storage_public: bool = False  # public bucket → build public object URLs
 
     @property
-    def r2_enabled(self) -> bool:
-        return bool(self.r2_access_key_id and self.r2_secret_access_key and self.r2_bucket
-                    and (self.r2_account_id or self.r2_endpoint_url))
+    def supabase_s3_endpoint_url(self) -> str:
+        """S3 endpoint URL — explicit override, else derived from the project ref."""
+        if self.supabase_s3_endpoint:
+            return self.supabase_s3_endpoint
+        if self.supabase_project_ref:
+            return f"https://{self.supabase_project_ref}.storage.supabase.co/storage/v1/s3"
+        return ""
+
+    @property
+    def storage_enabled(self) -> bool:
+        """True when all required Supabase Storage settings are present."""
+        return bool(
+            self.supabase_s3_access_key_id
+            and self.supabase_s3_secret_access_key
+            and self.supabase_storage_bucket
+            and self.supabase_s3_region
+            and self.supabase_s3_endpoint_url
+        )
 
     @property
     def celery_enabled(self) -> bool:
+        """True when a Celery broker is configured."""
         return bool(self.celery_broker_url)
 
     api_host: str = "127.0.0.1"
@@ -80,21 +131,26 @@ class Settings(BaseSettings):
 
     @property
     def raw_dir(self) -> Path:
+        """Local directory for raw capture JSON."""
         return self.storage_dir / "raw"
 
     @property
     def processed_dir(self) -> Path:
+        """Local directory for processed JSON."""
         return self.storage_dir / "processed"
 
     @property
     def screenshots_dir(self) -> Path:
+        """Local directory for screenshots."""
         return self.storage_dir / "screenshots"
 
     @property
     def html_dir(self) -> Path:
+        """Local directory for saved HTML."""
         return self.storage_dir / "html"
 
     def ensure_dirs(self) -> None:
+        """Create the local artifact directories if missing."""
         for d in (
             self.raw_dir,
             self.processed_dir,

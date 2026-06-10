@@ -44,12 +44,20 @@ _SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
 def _get_pipe():
+    """Lazily load and cache the HF sentiment pipeline; None if unavailable."""
     global _pipe, _pipe_loaded
     if _pipe_loaded:
         return _pipe
     _pipe_loaded = True
     try:
+        import os
+
         from transformers import pipeline  # type: ignore[import-not-found]
+
+        # Make a configured HF token available to transformers/huggingface_hub.
+        # setdefault → a shell-exported HF_TOKEN still wins over the .env value.
+        if settings.hf_token:
+            os.environ.setdefault("HF_TOKEN", settings.hf_token)
 
         _pipe = pipeline("sentiment-analysis", model=settings.sentiment_model, truncation=True)
         logger.info("loaded HF sentiment model: %s", settings.sentiment_model)
@@ -64,6 +72,7 @@ def _get_pipe():
 
 @lru_cache(maxsize=1)
 def _label_map() -> dict[str, str]:
+    """Map model label variants to negative/neutral/positive."""
     # cardiffnlp '-latest' returns negative/neutral/positive; older returns LABEL_0/1/2
     return {
         "negative": "negative", "neutral": "neutral", "positive": "positive",
@@ -72,11 +81,13 @@ def _label_map() -> dict[str, str]:
 
 
 def _brand_sentences(brand: str, text: str) -> list[str]:
+    """Return the sentences in text that mention the brand."""
     b = brand.lower()
     return [s for s in _SENT_SPLIT.split(text) if b in s.lower()]
 
 
 def _model_sentiment(text: str) -> str:
+    """Classify sentiment via the HF model, falling back to a lexicon."""
     pipe = _get_pipe()
     if pipe is not None:
         try:
