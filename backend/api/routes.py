@@ -117,6 +117,25 @@ def _project_to_out(p: Project) -> ProjectOut:
         created_at=p.created_at.isoformat() + "Z",
     )
 
+# ---- helper right after _project_to_out ----
+
+def _get_owned_project(db, project_id: int, user_id: str) -> Project:
+    """
+    Return the project if it exists and is owned by the given user.
+
+    Raises HTTP 404 for both missing projects and ownership mismatches —
+    deliberately indistinguishable to avoid leaking project existence to
+    unauthorized callers.
+    """
+    proj = db.scalar(
+        select(Project)
+        .where(Project.id == project_id)
+        .where(Project.user_id == user_id)
+    )
+    if proj is None:
+        raise HTTPException(404, "project not found")
+    return proj
+
 
 # ---------- capture ----------
 
@@ -125,11 +144,10 @@ def trigger_capture(
     project_id: int,
     payload: CaptureRequest,
     bg: BackgroundTasks,
+    current_user: AuthDep,
 ) -> dict:
     with session_scope() as db:
-        proj = db.get(Project, project_id)
-        if proj is None:
-            raise HTTPException(404, "project not found")
+        proj = _get_owned_project(db, project_id, current_user.id)
         prompts = payload.prompts or [p.prompt_text for p in proj.prompts]
         # geo precedence: request override → project default → global default
         geo = payload.geo_location or proj.geo_location or settings.default_geo_location
@@ -143,8 +161,8 @@ def trigger_capture(
 
     # Persist the chosen providers as the project's default for next time.
     with session_scope() as db:
-        proj = db.get(Project, project_id)
-        if proj is not None and payload.providers:
+        proj = _get_owned_project(db, project_id, current_user.id)
+        if payload.providers:
             proj.providers = ",".join(payload.providers)
 
     # Pre-create all (provider × prompt) runs as "pending" so the dashboard can
@@ -165,7 +183,9 @@ def trigger_capture(
 
 
 @router.post("/projects/{project_id}/reprocess")
-def reprocess(project_id: int, bg: BackgroundTasks) -> dict:
+def reprocess(project_id: int, bg: BackgroundTasks, current_user: AuthDep) -> dict:
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     mode, count = submit_reprocess(project_id, bg)
     return {"ok": True, "mode": mode, "reprocessed": count}
 
@@ -191,13 +211,11 @@ async def suggest_prompts_adhoc(body: SuggestPromptsBody) -> dict:
 
 
 @router.post("/projects/{project_id}/suggest-prompts")
-async def suggest_prompts(project_id: int) -> dict:
+async def suggest_prompts(project_id: int, current_user: AuthDep) -> dict:
     if not gemini.is_configured():
         raise HTTPException(400, "GEMINI_API_KEY is not set")
     with session_scope() as db:
-        proj = db.get(Project, project_id)
-        if proj is None:
-            raise HTTPException(404, "project not found")
+        proj = _get_owned_project(db, project_id, current_user.id)
         domain = proj.domain
         existing = [p.prompt_text for p in proj.prompts]
         competitors = [c.competitor_name for c in proj.competitors]
@@ -210,11 +228,9 @@ class AddPromptsBody(BaseModel):
 
 
 @router.post("/projects/{project_id}/prompts")
-def add_prompts(project_id: int, body: AddPromptsBody) -> dict:
+def add_prompts(project_id: int, body: AddPromptsBody, current_user: AuthDep) -> dict:
     with session_scope() as db:
-        proj = db.get(Project, project_id)
-        if proj is None:
-            raise HTTPException(404, "project not found")
+        proj = _get_owned_project(db, project_id, current_user.id)
         existing = {p.prompt_text.strip().lower() for p in proj.prompts}
         added = 0
         for text in body.prompts:
@@ -227,9 +243,11 @@ def add_prompts(project_id: int, body: AddPromptsBody) -> dict:
 
 
 @router.post("/projects/{project_id}/detect-competitors")
-async def detect_competitors(project_id: int) -> dict:
+async def detect_competitors(project_id: int, current_user: AuthDep) -> dict:
     if not gemini.is_configured():
         raise HTTPException(400, "GEMINI_API_KEY is not set")
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     added = await detect_competitors_for_project(project_id)
     return {"ok": True, "added": added}
 
@@ -237,7 +255,9 @@ async def detect_competitors(project_id: int) -> dict:
 # ---------- analytics ----------
 
 @router.get("/projects/{project_id}/overview")
-def overview(project_id: int) -> dict:
+def overview(project_id: int, current_user: AuthDep) -> dict:
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     data = AnalyticsService.overview(project_id)
     if not data:
         raise HTTPException(404, "project not found")
@@ -245,12 +265,24 @@ def overview(project_id: int) -> dict:
 
 
 @router.get("/projects/{project_id}/runs")
-def runs(project_id: int) -> list[dict]:
+def runs(project_id: int, current_user: AuthDep) -> list[dict]:
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     return AnalyticsService.runs(project_id)
 
 
 @router.get("/runs/{run_id}")
-def run_detail(run_id: int) -> dict:
+def run_detail(run_id: int, current_user: AuthDep) -> dict:
+    from backend.models import Run
+    with session_scope() as db:
+        r = db.scalar(
+            select(Run)
+            .join(Project)
+            .where(Run.id == run_id)
+            .where(Project.user_id == current_user.id)
+        )
+        if r is None:
+            raise HTTPException(404, "run not found")
     data = AnalyticsService.run_detail(run_id)
     if data is None:
         raise HTTPException(404, "run not found")
@@ -258,38 +290,53 @@ def run_detail(run_id: int) -> dict:
 
 
 @router.get("/projects/{project_id}/competitors")
-def competitors(project_id: int) -> dict:
+def competitors(project_id: int, current_user: AuthDep) -> dict:
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     return AnalyticsService.competitors(project_id)
 
 
 @router.get("/projects/{project_id}/providers")
-def provider_comparison(project_id: int) -> dict:
+def provider_comparison(project_id: int, current_user: AuthDep) -> dict:
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     return AnalyticsService.provider_comparison(project_id)
 
 
 @router.get("/projects/{project_id}/timeseries")
-def timeseries(project_id: int) -> dict:
+def timeseries(project_id: int, current_user: AuthDep) -> dict:
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     return AnalyticsService.timeseries(project_id)
 
 
 @router.get("/projects/{project_id}/history")
-def history(project_id: int) -> dict:
+def history(project_id: int, current_user: AuthDep) -> dict:
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     return AnalyticsService.history(project_id)
 
 
 @router.get("/projects/{project_id}/framing-context")
-def framing_context(project_id: int) -> dict:
+def framing_context(project_id: int, current_user: AuthDep) -> dict:
+    with session_scope() as db:
+        _get_owned_project(db, project_id, current_user.id)
     return AnalyticsService.framing_context(project_id)
 
 
 # ---------- artifacts ----------
 
 @router.get("/artifacts/screenshot/{run_id}")
-def get_screenshot(run_id: int):
+def get_screenshot(run_id: int, current_user: AuthDep):
     with session_scope() as db:
         from backend.models import Run
 
-        r = db.get(Run, run_id)
+        r = db.scalar(
+            select(Run)
+            .join(Project)
+            .where(Run.id == run_id)
+            .where(Project.user_id == current_user.id)
+        )
         if r is None or not r.screenshot_path:
             raise HTTPException(404, "no screenshot")
         ref = r.screenshot_path

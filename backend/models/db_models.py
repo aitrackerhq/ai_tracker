@@ -23,11 +23,10 @@ This table stores application-specific user information and owns projects.
 
 class Profile(Base):
     """
-    Application user profile.
+    Application-level user profile, keyed by the Supabase Auth user UUID.
 
-    Supabase Auth stores authentication.
-    This table stores application-specific user data and
-    owns projects.
+    Authentication is handled entirely by Supabase; this table stores
+    application-specific data and is the ownership anchor for projects.
     """
 
     __tablename__ = "profiles"
