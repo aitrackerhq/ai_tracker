@@ -22,24 +22,18 @@ import { supabase } from "../lib/supabase";
  * Maps raw Supabase auth error messages to user-friendly copy.
  * Falls back to a generic message for unexpected errors.
  */
-function friendlyAuthError(supabaseMessage) {
-  const msg = supabaseMessage?.toLowerCase() ?? "";
-
-  if (
-    msg.includes("invalid login credentials") ||
-    msg.includes("invalid credentials")
-  ) {
-    return "Invalid email or password.";
+function friendlyAuthError(authError) {
+  switch (authError?.code) {
+    case "invalid_credentials":
+      return "Invalid email or password.";
+    case "email_not_confirmed":
+      return "Please confirm your email address before signing in. Check your inbox for a verification link.";
+    case "over_request_rate_limit":
+      return "Too many sign-in attempts. Please wait a moment and try again.";
+    default:
+      // Unknown or client-side error (no code) — surface Supabase's message.
+      return authError?.message ?? "Something went wrong. Please try again.";
   }
-  if (msg.includes("email not confirmed")) {
-    return "Please confirm your email address before signing in. Check your inbox for a verification link.";
-  }
-  if (msg.includes("too many requests") || msg.includes("rate limit")) {
-    return "Too many sign-in attempts. Please wait a moment and try again.";
-  }
-
-  // Unknown error — surface Supabase's message rather than swallowing it.
-  return supabaseMessage ?? "Something went wrong. Please try again.";
 }
 
 export default function LoginPage() {
@@ -65,7 +59,7 @@ export default function LoginPage() {
     });
 
     if (authError) {
-      setError(friendlyAuthError(authError.message));
+      setError(friendlyAuthError(authError));
       setLoading(false);
       return;
     }
