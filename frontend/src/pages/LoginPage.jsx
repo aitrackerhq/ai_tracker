@@ -36,6 +36,9 @@ function friendlyAuthError(authError) {
       // silently swallowing errors we haven't explicitly mapped yet (e.g.
       // email_provider_disabled, user_banned, captcha_failed). If a new code
       // needs friendlier copy, add a case above rather than masking it here.
+      if (authError?.code) {
+        console.warn("[LoginPage] Unmapped auth error code:", authError.code);
+      }
       return authError?.message ?? "Something went wrong. Please try again.";
   }
 }
