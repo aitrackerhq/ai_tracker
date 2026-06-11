@@ -31,7 +31,11 @@ function friendlyAuthError(authError) {
     case "over_request_rate_limit":
       return "Too many sign-in attempts. Please wait a moment and try again.";
     default:
-      // Unknown or client-side error (no code) — surface Supabase's message.
+      // Intentionally surface authError.message for unmapped codes.
+      // Supabase auth messages are already user-readable English; this avoids
+      // silently swallowing errors we haven't explicitly mapped yet (e.g.
+      // email_provider_disabled, user_banned, captcha_failed). If a new code
+      // needs friendlier copy, add a case above rather than masking it here.
       return authError?.message ?? "Something went wrong. Please try again.";
   }
 }
