@@ -55,7 +55,7 @@ def seed() -> int:
         payload = {
             "provider": provider,
             "prompt": "best project management software for startups",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             "response_text": EXAMPLE_RESPONSE,
             "citations": EXAMPLE_CITATIONS,
             "links": [],
