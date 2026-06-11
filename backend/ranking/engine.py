@@ -133,4 +133,13 @@ class RankingEngine:
 
 
 def compute_project_rankings(project_id: int) -> dict[str, Any]:
-    return RankingEngine(project_id).compute()
+    """Project brand rankings + GEO scores.
+
+    Delegates to the six-component GEO scoring engine (backend.scoring), which
+    replaced the old additive `visibility_score` formula (issue #9). The legacy
+    `RankingEngine`/`BrandStats` below are retained only for reference and are no
+    longer the source of truth.
+    """
+    from backend.scoring import compute_project_scores
+
+    return compute_project_scores(project_id)
