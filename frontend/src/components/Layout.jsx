@@ -32,12 +32,13 @@ function getUserDisplay(user) {
   const displayName = name || email;
 
   // Build initials: "John Doe" → "JD", "shubham" → "S", "a@b.com" → "A"
-  const initials = displayName
-    .split(/[\s@]+/) // split on spaces or @ (handles email fallback)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join("");
+  const initials =
+    displayName
+      .split(/[\s@]+/) // split on spaces or @ (handles email fallback)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0].toUpperCase())
+      .join("") || "?";
 
   return { displayName, email, initials };
 }
