@@ -4,7 +4,13 @@ import { Plus, ArrowRight, Trash2, Sparkles } from "lucide-react";
 
 import { api } from "../services/api";
 import { useFetch } from "../hooks/useFetch";
-import { Badge, Card, EmptyState, SectionHeader, Skeleton } from "../components/ui";
+import {
+  Badge,
+  Card,
+  EmptyState,
+  SectionHeader,
+  Skeleton,
+} from "../components/ui";
 import { PROVIDERS, PROVIDER_LABELS } from "../services/providers";
 
 function NewProjectForm({ onCreated }) {
@@ -20,10 +26,15 @@ function NewProjectForm({ onCreated }) {
   const navigate = useNavigate();
 
   const toggleProvider = (p) =>
-    setProviders((cur) => (cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]));
+    setProviders((cur) =>
+      cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p],
+    );
 
   const promptLines = () =>
-    prompts.split("\n").map((p) => p.trim()).filter(Boolean);
+    prompts
+      .split("\n")
+      .map((p) => p.trim())
+      .filter(Boolean);
 
   const generatePrompts = async () => {
     if (!domain.trim()) {
@@ -35,7 +46,10 @@ function NewProjectForm({ onCreated }) {
     try {
       const r = await api.suggestPromptsAdhoc({
         domain: domain.trim(),
-        competitors: competitors.split(",").map((c) => c.trim()).filter(Boolean),
+        competitors: competitors
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean),
         existing_prompts: promptLines(),
       });
       const merged = [...promptLines(), ...(r.suggestions || [])].slice(0, 5);
@@ -75,14 +89,27 @@ function NewProjectForm({ onCreated }) {
 
   return (
     <Card>
-      <SectionHeader title="New Project" subtitle="Track a brand across AI surfaces." />
+      <SectionHeader
+        title="New Project"
+        subtitle="Track a brand across AI surfaces."
+      />
       <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label className="text-xs uppercase tracking-wider text-text-muted block mb-1">Name</label>
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Notion" required />
+          <label className="text-xs uppercase tracking-wider text-text-muted block mb-1">
+            Name
+          </label>
+          <input
+            className="input"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Notion"
+            required
+          />
         </div>
         <div>
-          <label className="text-xs uppercase tracking-wider text-text-muted block mb-1">Domain</label>
+          <label className="text-xs uppercase tracking-wider text-text-muted block mb-1">
+            Domain
+          </label>
           <input
             className="input"
             value={domain}
@@ -125,7 +152,9 @@ function NewProjectForm({ onCreated }) {
             className="input min-h-[120px] font-mono"
             value={prompts}
             onChange={(e) => setPrompts(e.target.value)}
-            placeholder={"best project management software\nbest collaboration tools\nalternatives to confluence"}
+            placeholder={
+              "best project management software\nbest collaboration tools\nalternatives to confluence"
+            }
           />
         </div>
         <div className="md:col-span-2">
@@ -159,9 +188,15 @@ function NewProjectForm({ onCreated }) {
             ))}
           </div>
         </div>
-        {error && <div className="md:col-span-2 text-sm text-accent-red">{error}</div>}
+        {error && (
+          <div className="md:col-span-2 text-sm text-accent-red">{error}</div>
+        )}
         <div className="md:col-span-2 flex justify-end">
-          <button className="btn-primary" type="submit" disabled={submitting || !providers.length}>
+          <button
+            className="btn-primary"
+            type="submit"
+            disabled={submitting || !providers.length}
+          >
             <Plus size={16} />
             {submitting ? "Creating…" : "Create project"}
           </button>
@@ -172,20 +207,47 @@ function NewProjectForm({ onCreated }) {
 }
 
 export default function Projects() {
-  const { data, loading, error, reload } = useFetch(() => api.listProjects(), []);
+  const { data, loading, error, reload } = useFetch(
+    () => api.listProjects(),
+    [],
+  );
+  const [deletingIds, setDeletingIds] = useState(new Set());
+  const [deleteError, setDeleteError] = useState(null);
 
-  const remove = async (id) => {
+  const remove = (id) => {
     if (!confirm("Delete this project and all its runs?")) return;
-    await api.deleteProject(id);
-    reload();
+
+    // Optimistically hide the card immediately.
+    setDeletingIds((prev) => new Set(prev).add(id));
+    setDeleteError(null);
+
+    api
+      .deleteProject(id)
+      .then(() => {
+        // Backend confirmed — sync the canonical list.
+        reload();
+      })
+      .catch((err) => {
+        // Rollback: make the card reappear and surface the error.
+        setDeletingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        setDeleteError(`Failed to delete project: ${err.message}`);
+      });
   };
+
+  // Derive the visible list by filtering out optimistically-deleted ids.
+  const visibleProjects = (data ?? []).filter((p) => !deletingIds.has(p.id));
 
   return (
     <div className="flex flex-col gap-8">
       <div>
         <h1 className="text-2xl font-semibold">Projects</h1>
         <p className="text-sm text-text-muted mt-1">
-          Each project tracks a single brand across ChatGPT, Gemini, and Google AI Overviews.
+          Each project tracks a single brand across ChatGPT, Gemini, and Google
+          AI Overviews.
         </p>
       </div>
 
@@ -193,25 +255,45 @@ export default function Projects() {
 
       <div>
         <SectionHeader title="Existing projects" />
+        {deleteError && (
+          <Card className="mb-4">
+            <div className="text-sm text-accent-red">{deleteError}</div>
+          </Card>
+        )}
         {loading ? (
           <Card>
             <Skeleton className="h-6 w-1/3 mb-2" />
             <Skeleton className="h-4 w-1/2" />
           </Card>
         ) : error ? (
-          <Card><div className="text-sm text-accent-red">Failed to load: {error.message}</div></Card>
-        ) : !data?.length ? (
-          <EmptyState title="No projects yet" hint="Create one above to get started." />
+          <Card>
+            <div className="text-sm text-accent-red">
+              Failed to load: {error.message}
+            </div>
+          </Card>
+        ) : !visibleProjects.length ? (
+          <EmptyState
+            title="No projects yet"
+            hint="Create one above to get started."
+          />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {data.map((p) => (
-              <Card key={p.id} className="hover:border-border-strong transition-colors">
+            {visibleProjects.map((p) => (
+              <Card
+                key={p.id}
+                className="hover:border-border-strong transition-colors"
+              >
                 <div className="flex justify-between items-start">
                   <div>
                     <div className="font-semibold">{p.name}</div>
-                    <div className="text-xs font-mono text-text-muted mt-0.5">{p.domain}</div>
+                    <div className="text-xs font-mono text-text-muted mt-0.5">
+                      {p.domain}
+                    </div>
                   </div>
-                  <button onClick={() => remove(p.id)} className="text-text-dim hover:text-accent-red">
+                  <button
+                    onClick={() => remove(p.id)}
+                    className="text-text-dim hover:text-accent-red"
+                  >
                     <Trash2 size={14} />
                   </button>
                 </div>
