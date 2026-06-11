@@ -4,7 +4,7 @@ without needing a live browser. Useful for smoke-testing the frontend.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from backend.database.session import engine, session_scope
 from backend.models import Base, Citation, Competitor, Mention, Project, Prompt, Run
@@ -55,7 +55,7 @@ def seed() -> int:
         payload = {
             "provider": provider,
             "prompt": "best project management software for startups",
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "response_text": EXAMPLE_RESPONSE,
             "citations": EXAMPLE_CITATIONS,
             "links": [],
