@@ -222,12 +222,17 @@ export default function Projects() {
     [],
   );
 
-  const clearDeletingId = (id) =>
+  // Once canonical data arrives, prune ids that the backend no longer has.
+  // This is the only place successful deletes are cleared from deletingIds —
+  // keeping the card hidden right up until the fresh list confirms it's gone.
+  useEffect(() => {
+    if (!data) return;
+    const idsInData = new Set(data.map((p) => p.id));
     setDeletingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
+      const next = new Set([...prev].filter((id) => idsInData.has(id)));
+      return next.size === prev.size ? prev : next; // avoid re-render if nothing changed
     });
+  }, [data]);
 
   const remove = (id) => {
     if (!confirm("Delete this project and all its runs?")) return;
@@ -240,14 +245,18 @@ export default function Projects() {
       .deleteProject(id)
       .then(() => {
         if (!mountedRef.current) return;
-        // Backend confirmed — clean up optimistic state and sync.
-        clearDeletingId(id);
+        // Backend confirmed — reload fetches fresh data; the useEffect above
+        // will prune this id from deletingIds once data no longer contains it.
         reload();
       })
       .catch((err) => {
         if (!mountedRef.current) return;
         // Rollback: make the card reappear and surface the error.
-        clearDeletingId(id);
+        setDeletingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
         setDeleteError(`Failed to delete project: ${err.message}`);
       });
   };
