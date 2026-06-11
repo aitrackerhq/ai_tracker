@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Plus, ArrowRight, Trash2, Sparkles } from "lucide-react";
 
@@ -213,6 +213,21 @@ export default function Projects() {
   );
   const [deletingIds, setDeletingIds] = useState(new Set());
   const [deleteError, setDeleteError] = useState(null);
+  // Guard against setState calls after the component unmounts.
+  const mountedRef = useRef(true);
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
+
+  const clearDeletingId = (id) =>
+    setDeletingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   const remove = (id) => {
     if (!confirm("Delete this project and all its runs?")) return;
@@ -224,16 +239,15 @@ export default function Projects() {
     api
       .deleteProject(id)
       .then(() => {
-        // Backend confirmed — sync the canonical list.
+        if (!mountedRef.current) return;
+        // Backend confirmed — clean up optimistic state and sync.
+        clearDeletingId(id);
         reload();
       })
       .catch((err) => {
+        if (!mountedRef.current) return;
         // Rollback: make the card reappear and surface the error.
-        setDeletingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
+        clearDeletingId(id);
         setDeleteError(`Failed to delete project: ${err.message}`);
       });
   };
@@ -293,6 +307,7 @@ export default function Projects() {
                   <button
                     onClick={() => remove(p.id)}
                     className="text-text-dim hover:text-accent-red"
+                    aria-label={`Delete project ${p.name}`}
                   >
                     <Trash2 size={14} />
                   </button>
