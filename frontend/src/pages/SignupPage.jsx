@@ -1,30 +1,43 @@
 // Intentionally rendered OUTSIDE <Layout> — it's a standalone full-screen page.
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 
 /**
  * Creates a new user account using Supabase authentication.
  *
- * Users are prompted to verify their email address before signing in.
+ * Duplicate-email behaviour:
+ *   When email-confirmation is enabled, Supabase does NOT return an error for
+ *   duplicate signups. Instead it returns { user: { identities: [] }, session: null }.
+ *   The empty identities array is the documented signal that the email is already
+ *   registered. Without this check, the UI incorrectly tells the user to check
+ *   their inbox — no email ever arrives and they are stuck.
+ *
+ *   When email-confirmation is disabled, Supabase returns a live session for
+ *   both new and returning users, so this case does not arise.
+ *
+ * Accepts optional pre-filled state from LoginPage:
+ *   location.state.email — pre-fills the email field when navigating from login.
  */
 
 export default function SignupPage() {
   const navigate = useNavigate();
+  const location = useLocation();
 
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(location.state?.email ?? "");
   const [password, setPassword] = useState("");
   const [error, setError] = useState(null);
+  // Separate state for the "already registered" case so we can render a
+  // sign-in CTA rather than a generic error — safe here because the user
+  // submitted this email themselves (not enumeration).
+  const [alreadyExists, setAlreadyExists] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  /**
-   * Creates a new account and initiates email verification.
-   */
 
   async function handleSubmit(e) {
     e.preventDefault();
     setError(null);
+    setAlreadyExists(false);
     setLoading(true);
 
     const { data, error: signUpError } = await supabase.auth.signUp({
@@ -39,11 +52,19 @@ export default function SignupPage() {
       return;
     }
 
+    // Supabase returns identities: [] (empty array) when the email is already
+    // registered and email confirmation is enabled. No error is thrown.
+    if (data.user && data.user.identities?.length === 0) {
+      setAlreadyExists(true);
+      setLoading(false);
+      return;
+    }
+
     if (data.session) {
-      // Email confirmation disabled — user is immediately logged in
+      // Email confirmation disabled — user is immediately logged in.
       navigate("/", { replace: true });
     } else {
-      // Email confirmation enabled — send to login with a message
+      // Email confirmation enabled — send to login with a message.
       navigate("/login", {
         state: {
           message: "Check your email to confirm your account, then sign in.",
@@ -70,6 +91,19 @@ export default function SignupPage() {
           </div>
         )}
 
+        {alreadyExists && (
+          <div className="mb-4 rounded-md border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-300">
+            <p>An account with this email already exists.</p>
+            <Link
+              to="/login"
+              state={{ email }}
+              className="mt-2 inline-block font-medium text-blue-200 hover:underline"
+            >
+              Sign in instead →
+            </Link>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="mb-2 block text-sm text-text-muted">Name</label>
@@ -90,7 +124,11 @@ export default function SignupPage() {
               autoComplete="email"
               required
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setAlreadyExists(false);
+                setError(null);
+              }}
               className="input"
             />
           </div>
